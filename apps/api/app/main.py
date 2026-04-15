@@ -26,7 +26,7 @@ from .image_ops import (
     render_piece_svg,
     write_piece_marker_masks,
 )
-from .jobs import create_job
+from .jobs import create_job, update_job_progress
 from .layout_ops import auto_map_pieces, build_design_canvas_config, merge_mapping_into_transform
 from .providers import get_provider
 from .schemas import (
@@ -144,14 +144,25 @@ def import_template(project_id: str, asset_id: str = Form(...)) -> dict:
     ext = Path(asset["filename"]).suffix.lower()
     if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
         raise HTTPException(status_code=400, detail="请上传 PNG/WebP 透明裁片模板，或白底排版原图 JPG/PNG/WebP。")
+    job_id = create_job(project_id, "template_import", {"asset_id": asset_id}, _import_template_job)
+    return {"job_id": job_id}
+
+
+def _import_template_job(job_id: str, payload: dict) -> dict:
+    project_id = _job_project(job_id)
+    asset_id = payload["asset_id"]
+    asset = get_asset_row(asset_id, project_id)
     source_path = storage_path(asset["path"])
+    update_job_progress(job_id, 0.12)
     template_source = "alpha" if has_transparent_alpha(source_path) else "layout_image"
     templates_dir = project_dir(project_id) / "templates"
     if template_source == "alpha":
         template_path = source_path
     else:
         template_path = templates_dir / f"{asset_id}_template.png"
+        update_job_progress(job_id, 0.24)
         make_layout_template(source_path, template_path)
+    update_job_progress(job_id, 0.4)
     red_marker_path = make_red_marker_mask(source_path, templates_dir / f"{asset_id}_red_markers.png")
 
     asset_metadata = loads(asset.get("metadata"), {})
@@ -165,7 +176,9 @@ def import_template(project_id: str, asset_id: str = Form(...)) -> dict:
     pieces_dir = project_dir(project_id) / "pieces"
     for old in [*pieces_dir.glob("*_mask.png"), *pieces_dir.glob("*_markers.png")]:
         old.unlink()
+    update_job_progress(job_id, 0.52)
     pieces = extract_alpha_components(template_path, pieces_dir)
+    update_job_progress(job_id, 0.72)
     red_marker_count = write_piece_marker_masks(pieces, red_marker_path)
     asset_metadata["red_marker_count"] = red_marker_count
     with connect() as con:
@@ -201,12 +214,14 @@ def import_template(project_id: str, asset_id: str = Form(...)) -> dict:
                     now_iso(),
                 ),
             )
+    update_job_progress(job_id, 0.86)
     stored_pieces = raw_pieces(project_id)
     design_canvas = build_design_canvas_config(stored_pieces, {"garment_type": "unknown"})
     design_canvas = carry_existing_design_canvas(project_id, design_canvas)
     mappings = auto_map_pieces(stored_pieces, design_canvas, "unknown")
     apply_piece_mappings(project_id, stored_pieces, mappings)
     update_project_design_canvas(project_id, design_canvas)
+    update_job_progress(job_id, 0.95)
     return {
         "pieces": list_pieces(project_id),
         "template_source": template_source,

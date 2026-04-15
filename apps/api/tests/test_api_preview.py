@@ -24,7 +24,7 @@ def test_preview_creates_default_texture_when_none_exists() -> None:
             data={"kind": "template"},
             files={"file": ("mask.png", buf, "image/png")},
         ).json()
-        client.post(f"/api/projects/{project['id']}/templates/import", data={"asset_id": asset["id"]})
+        import_template(client, project["id"], asset["id"])
 
         job_id = client.post(f"/api/projects/{project['id']}/render/preview", data={"texture_id": ""}).json()["job_id"]
         job = wait_job(client, job_id)
@@ -51,7 +51,7 @@ def test_jpeg_layout_image_import_creates_piece_masks() -> None:
             data={"kind": "template"},
             files={"file": ("layout.jpg", buf, "image/jpeg")},
         ).json()
-        imported = client.post(f"/api/projects/{project['id']}/templates/import", data={"asset_id": asset["id"]}).json()
+        imported = import_template(client, project["id"], asset["id"])
 
         assert imported["template_source"] == "layout_image"
         assert imported["template_path"].endswith("_template.png")
@@ -80,7 +80,7 @@ def test_global_fit_updates_piece_transforms_and_preview() -> None:
             data={"kind": "template"},
             files={"file": ("template.png", template_buf, "image/png")},
         ).json()
-        imported = client.post(f"/api/projects/{project['id']}/templates/import", data={"asset_id": template["id"]}).json()
+        imported = import_template(client, project["id"], template["id"])
         assert len(imported["pieces"]) == 2
 
         texture = Image.new("RGBA", (64, 64), (24, 96, 180, 255))
@@ -183,7 +183,7 @@ def test_global_fit_texture_source_selection_and_fallback() -> None:
             data={"kind": "template"},
             files={"file": ("template.png", mask_buf, "image/png")},
         ).json()
-        client.post(f"/api/projects/{project['id']}/templates/import", data={"asset_id": template["id"]})
+        import_template(client, project["id"], template["id"])
 
         logo = Image.new("RGBA", (80, 80), (255, 255, 255, 0))
         ImageDraw.Draw(logo).rectangle((20, 20, 60, 60), fill=(20, 20, 20, 255))
@@ -247,7 +247,7 @@ def test_design_canvas_layers_safety_and_export_manifest() -> None:
             data={"kind": "template"},
             files={"file": ("template.png", template_buf, "image/png")},
         ).json()
-        client.post(f"/api/projects/{project['id']}/templates/import", data={"asset_id": template["id"]})
+        import_template(client, project["id"], template["id"])
 
         texture = Image.new("RGBA", (80, 80), (24, 96, 180, 255))
         texture_buf = BytesIO()
@@ -356,3 +356,11 @@ def wait_job(client: TestClient, job_id: str) -> dict:
             return job
         time.sleep(0.1)
     raise AssertionError("job did not finish")
+
+
+def import_template(client: TestClient, project_id: str, asset_id: str) -> dict:
+    created = client.post(f"/api/projects/{project_id}/templates/import", data={"asset_id": asset_id}).json()
+    assert "job_id" in created
+    done = wait_job(client, created["job_id"])
+    assert done["status"] == "succeeded"
+    return done["output"]

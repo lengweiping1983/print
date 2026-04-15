@@ -24,6 +24,10 @@ def create_job(project_id: str, job_type: str, payload: dict[str, Any], fn: Exec
     return job_id
 
 
+def update_job_progress(job_id: str, progress: float) -> None:
+    _update(job_id, progress=progress)
+
+
 def _run_job(job_id: str, payload: dict[str, Any], fn: ExecutorFn) -> None:
     _update(job_id, status="running", progress=0.1)
     try:
@@ -58,4 +62,3 @@ def _update(
     values.append(job_id)
     with connect() as con:
         con.execute(f"update jobs set {', '.join(fields)} where id = ?", values)
-

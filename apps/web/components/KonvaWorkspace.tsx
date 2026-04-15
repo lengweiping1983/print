@@ -8,6 +8,10 @@ import "konva/lib/shapes/Text.js";
 import { useEffect, useMemo, useState } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva/es/ReactKonvaCore.js";
 
+const loadedImageCache = new Map<string, Promise<HTMLImageElement | null>>();
+const luminanceMaskCache = new Map<string, HTMLCanvasElement>();
+const outlineMaskCache = new Map<string, HTMLCanvasElement>();
+
 function useLoadedImage(src: string, fallbackSrc = "") {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   useEffect(() => {
@@ -15,31 +19,52 @@ function useLoadedImage(src: string, fallbackSrc = "") {
       setImage(null);
       return;
     }
-    const img = new window.Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => setImage(img);
-    img.onerror = () => {
-      if (fallbackSrc && fallbackSrc !== src) {
-        const fallback = new window.Image();
-        fallback.crossOrigin = "anonymous";
-        fallback.onload = () => setImage(fallback);
-        fallback.onerror = () => setImage(null);
-        fallback.src = fallbackSrc;
-      } else {
-        setImage(null);
-      }
+    let active = true;
+    loadCachedImage(src, fallbackSrc).then((next) => {
+      if (active) setImage(next);
+    });
+    return () => {
+      active = false;
     };
-    img.src = src;
   }, [src, fallbackSrc]);
   return image;
 }
 
-function useLuminanceMaskImage(image: HTMLImageElement | null) {
+function loadCachedImage(src: string, fallbackSrc = "") {
+  const cacheKey = `${src}::${fallbackSrc}`;
+  const cached = loadedImageCache.get(cacheKey);
+  if (cached) return cached;
+
+  const promise = loadImage(src).then((image) => {
+    if (image || !fallbackSrc || fallbackSrc === src) return image;
+    return loadImage(fallbackSrc);
+  });
+  loadedImageCache.set(cacheKey, promise);
+  return promise;
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement | null>((resolve) => {
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function useLuminanceMaskImage(image: HTMLImageElement | null, cacheKey = "") {
   const [mask, setMask] = useState<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (!image) {
       setMask(null);
+      return;
+    }
+    const key = cacheKey || image.currentSrc || image.src;
+    const cached = luminanceMaskCache.get(key);
+    if (cached) {
+      setMask(cached);
       return;
     }
 
@@ -65,18 +90,25 @@ function useLuminanceMaskImage(image: HTMLImageElement | null) {
       data[index + 3] = alpha;
     }
     context.putImageData(imageData, 0, 0);
+    luminanceMaskCache.set(key, canvas);
     setMask(canvas);
-  }, [image]);
+  }, [image, cacheKey]);
 
   return mask;
 }
 
-function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1) {
+function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1, enabled = true, cacheKey = "") {
   const [outline, setOutline] = useState<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    if (!mask) {
+    if (!mask || !enabled) {
       setOutline(null);
+      return;
+    }
+    const key = `${cacheKey || `${mask.width}x${mask.height}`}:${strokeWidth}`;
+    const cached = outlineMaskCache.get(key);
+    if (cached) {
+      setOutline(cached);
       return;
     }
 
@@ -125,8 +157,9 @@ function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1) {
       }
     }
     outlineContext.putImageData(output, 0, 0);
+    outlineMaskCache.set(key, canvas);
     setOutline(canvas);
-  }, [mask, strokeWidth]);
+  }, [mask, strokeWidth, enabled, cacheKey]);
 
   return outline;
 }
@@ -178,8 +211,9 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
   const textureImage = useLoadedImage(textureUrl);
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
-  const alphaMaskImage = useLuminanceMaskImage(maskImage);
-  const selectedOutlineImage = useMaskOutlineImage(alphaMaskImage, outlineWidth);
+  const selectedMaskKey = selected?.mask_url || "";
+  const alphaMaskImage = useLuminanceMaskImage(maskImage, selectedMaskKey);
+  const selectedOutlineImage = useMaskOutlineImage(alphaMaskImage, outlineWidth, showOutlines, selectedMaskKey);
   const [pieceZoom, setPieceZoom] = useState(1);
   const selectedMaskFrame = useMemo(() => {
     if (!selected) return null;
@@ -707,7 +741,7 @@ function LayoutPieceTexture({
   onSelect: () => void;
 }) {
   const mask = useLoadedImage(piece.mask_url);
-  const alphaMask = useLuminanceMaskImage(mask);
+  const alphaMask = useLuminanceMaskImage(mask, piece.mask_url);
   if (!alphaMask) return null;
 
   return (
@@ -724,8 +758,8 @@ function LayoutPieceTexture({
 
 function PieceOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piece; selected: boolean; outlineWidth: number; onSelect: () => void }) {
   const mask = useLoadedImage(piece.mask_url);
-  const alphaMask = useLuminanceMaskImage(mask);
-  const outline = useMaskOutlineImage(alphaMask, outlineWidth);
+  const alphaMask = useLuminanceMaskImage(mask, piece.mask_url);
+  const outline = useMaskOutlineImage(alphaMask, outlineWidth, true, piece.mask_url);
   return (
     <>
       {outline && (

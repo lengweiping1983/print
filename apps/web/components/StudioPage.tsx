@@ -140,13 +140,16 @@ export function StudioPage() {
       setTemplateFileName(file.name);
       const asset = await upload("template", file);
       if (!asset) return;
-      setNotice("正在识别模板/排版原图并拆分裁片...");
-      const imported = await api.importTemplate(project.id, asset.id);
-      setPieces(imported.pieces);
-      setSelectedPieceId(imported.pieces[0]?.id ?? "");
+      setNotice("正在创建模板解析任务...");
+      const created = await api.importTemplate(project.id, asset.id);
+      const done = await waitForJob(created.job_id, setJob);
+      const imported = done.output as { pieces?: Piece[]; design_canvas?: DesignCanvas; warnings?: string[] };
+      const importedPieces = imported.pieces ?? [];
+      setPieces(importedPieces);
+      setSelectedPieceId(importedPieces[0]?.id ?? "");
       if (imported.design_canvas) setDesignCanvas(imported.design_canvas);
       const warningText = imported.warnings?.length ? `，${imported.warnings.length} 个部位需要复核` : "";
-      setNotice(`模板解析完成，已自动识别部位并建立全局映射，共 ${imported.pieces.length} 个裁片${warningText}。`);
+      setNotice(`模板解析完成，已自动识别部位并建立全局映射，共 ${importedPieces.length} 个裁片${warningText}。`);
     } catch (error) {
       setNotice(readError(error));
     }

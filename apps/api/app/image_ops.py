@@ -8,6 +8,13 @@ from PIL import Image, ImageChops, ImageDraw, ImageOps
 
 from .config import MIN_COMPONENT_AREA
 
+try:
+    import cv2
+    import numpy as np
+except Exception:  # pragma: no cover - fallback keeps Pillow-only installs usable
+    cv2 = None
+    np = None
+
 
 def image_size(path: Path) -> tuple[int, int]:
     with Image.open(path) as img:
@@ -42,13 +49,18 @@ def make_layout_template(
         transparent = alpha.point(lambda value: 255 if value <= 10 else 0)
         candidate = ImageChops.lighter(candidate, transparent)
         width, height = candidate.size
-        background = _scanline_edge_connected_background(candidate.tobytes(), width, height)
-        alpha_bytes = bytearray(width * height)
-        for idx, is_background in enumerate(background):
-            alpha_bytes[idx] = 0 if is_background else 255
+        background = _edge_connected_background(candidate)
+        if background is None:
+            background = _scanline_edge_connected_background(candidate.tobytes(), width, height)
+            alpha_bytes = bytearray(width * height)
+            for idx, is_background in enumerate(background):
+                alpha_bytes[idx] = 0 if is_background else 255
+            alpha_mask = Image.frombytes("L", (width, height), bytes(alpha_bytes))
+        else:
+            alpha_mask = Image.fromarray(np.where(background, 0, 255).astype("uint8"))
 
         out = img.copy()
-        out.putalpha(Image.frombytes("L", (width, height), bytes(alpha_bytes)))
+        out.putalpha(alpha_mask)
         out.save(out_path)
     return out_path
 
@@ -157,6 +169,26 @@ def _scanline_edge_connected_background(candidate: bytes, width: int, height: in
     return background
 
 
+def _edge_connected_background(candidate: Image.Image):
+    if cv2 is None or np is None:
+        return None
+
+    data = np.asarray(candidate, dtype=np.uint8)
+    if data.ndim != 2 or data.size == 0:
+        return None
+
+    foreground = (data > 0).astype(np.uint8)
+    label_count, labels, _stats, _centroids = cv2.connectedComponentsWithStats(foreground, connectivity=4)
+    if label_count <= 1:
+        return np.zeros_like(foreground, dtype=bool)
+
+    edge_labels = np.unique(np.concatenate((labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1])))
+    edge_labels = edge_labels[edge_labels > 0]
+    if edge_labels.size == 0:
+        return np.zeros_like(foreground, dtype=bool)
+    return np.isin(labels, edge_labels)
+
+
 def extract_alpha_components(
     image_path: Path,
     out_dir: Path,
@@ -167,6 +199,10 @@ def extract_alpha_components(
         alpha = img.getchannel("A")
         width, height = img.size
         alpha_bytes = alpha.tobytes()
+
+    cv2_pieces = _extract_alpha_components_cv2(alpha, out_dir, min_area)
+    if cv2_pieces is not None:
+        return cv2_pieces
 
     mask = bytearray(1 if a > 10 else 0 for a in alpha_bytes)
     visited = bytearray(width * height)
@@ -212,6 +248,62 @@ def extract_alpha_components(
         )
 
     pieces.sort(key=lambda p: p["area"], reverse=True)
+    return pieces
+
+
+def _extract_alpha_components_cv2(alpha: Image.Image, out_dir: Path, min_area: int) -> list[dict] | None:
+    if cv2 is None or np is None:
+        return None
+
+    data = np.asarray(alpha, dtype=np.uint8)
+    if data.ndim != 2 or data.size == 0:
+        return None
+
+    binary = (data > 10).astype(np.uint8)
+    label_count, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=4)
+    components: list[dict] = []
+    for label in range(1, label_count):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area < min_area:
+            continue
+        x = int(stats[label, cv2.CC_STAT_LEFT])
+        y = int(stats[label, cv2.CC_STAT_TOP])
+        width = int(stats[label, cv2.CC_STAT_WIDTH])
+        height = int(stats[label, cv2.CC_STAT_HEIGHT])
+        components.append(
+            {
+                "label": label,
+                "bbox": (x, y, width, height),
+                "area": area,
+                "centroid": (float(centroids[label][0]), float(centroids[label][1])),
+            }
+        )
+
+    components.sort(key=lambda item: item["area"], reverse=True)
+    pieces: list[dict] = []
+    for index, component in enumerate(components, start=1):
+        label = component["label"]
+        x, y, width, height = component["bbox"]
+        cropped = (labels[y : y + height, x : x + width] == label).astype(np.uint8) * 255
+        mask_path = out_dir / f"piece_{index:02d}_mask.png"
+        Image.fromarray(cropped).save(mask_path)
+        max_x = x + width - 1
+        max_y = y + height - 1
+        centroid_x, centroid_y = component["centroid"]
+        pieces.append(
+            {
+                "mask_path": mask_path,
+                "polygon": bbox_polygon(x, y, max_x, max_y),
+                "bbox": {"x": x, "y": y, "width": width, "height": height},
+                "source_x": x,
+                "source_y": y,
+                "width": width,
+                "height": height,
+                "area": component["area"],
+                "centroid_x": centroid_x,
+                "centroid_y": centroid_y,
+            }
+        )
     return pieces
 
 

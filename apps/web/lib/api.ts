@@ -28,7 +28,7 @@ export const api = {
   importTemplate(projectId: string, assetId: string) {
     const form = new FormData();
     form.set("asset_id", assetId);
-    return request<{ pieces: Piece[]; design_canvas?: DesignCanvas; warnings?: string[] }>(`/api/projects/${projectId}/templates/import`, { method: "POST", body: form });
+    return request<{ job_id: string }>(`/api/projects/${projectId}/templates/import`, { method: "POST", body: form });
   },
   listPieces(projectId: string) {
     return request<Piece[]>(`/api/projects/${projectId}/pieces`);
