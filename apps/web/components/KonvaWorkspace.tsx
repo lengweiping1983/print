@@ -57,6 +57,62 @@ function useLuminanceMaskImage(image: HTMLImageElement | null) {
   return mask;
 }
 
+function useMaskOutlineImage(mask: HTMLCanvasElement | null) {
+  const [outline, setOutline] = useState<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!mask) {
+      setOutline(null);
+      return;
+    }
+
+    const sourceContext = mask.getContext("2d");
+    if (!sourceContext) {
+      setOutline(null);
+      return;
+    }
+
+    const width = mask.width;
+    const height = mask.height;
+    const source = sourceContext.getImageData(0, 0, width, height).data;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setOutline(null);
+      return;
+    }
+
+    const outlineData = context.createImageData(width, height);
+    const target = outlineData.data;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = (y * width + x) * 4;
+        if (source[index + 3] < 32) continue;
+        const isEdge =
+          x === 0 ||
+          y === 0 ||
+          x === width - 1 ||
+          y === height - 1 ||
+          source[index - 4 + 3] < 32 ||
+          source[index + 4 + 3] < 32 ||
+          source[index - width * 4 + 3] < 32 ||
+          source[index + width * 4 + 3] < 32;
+        if (!isEdge) continue;
+        target[index] = 224;
+        target[index + 1] = 82;
+        target[index + 2] = 82;
+        target[index + 3] = 255;
+      }
+    }
+    context.putImageData(outlineData, 0, 0);
+    setOutline(canvas);
+  }, [mask]);
+
+  return outline;
+}
+
 type Props = {
   pieces: Piece[];
   selectedPieceId: string;
@@ -71,13 +127,15 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, o
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
   const alphaMaskImage = useLuminanceMaskImage(maskImage);
+  const selectedOutlineImage = useMaskOutlineImage(alphaMaskImage);
   const [pieceZoom, setPieceZoom] = useState(1);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
   const selectedMaskFrame = useMemo(() => {
     if (!selected) return null;
-    const width = 440;
-    const height = Math.min(520, Math.max(160, selected.height * (width / Math.max(1, selected.width))));
-    return { x: 40, y: 60, width, height };
+    const scale = Math.min(440 / Math.max(1, selected.width), 520 / Math.max(1, selected.height));
+    const width = Math.max(1, selected.width * scale);
+    const height = Math.max(1, selected.height * scale);
+    return { x: (520 - width) / 2, y: (640 - height) / 2, width, height };
   }, [selected]);
   const bounds = useMemo(() => {
     const width = Math.max(1200, ...pieces.map((piece) => piece.source_x + piece.width + 80), 1200);
@@ -109,10 +167,10 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, o
             <ZoomButton label="+" onClick={() => setPieceZoom((zoom) => clampZoom(zoom + 0.1))} />
           </div>
         </div>
-        <div className="checkerboard overflow-hidden rounded-lg border border-line">
+        <div className="overflow-hidden rounded-lg border border-line bg-white">
           <Stage width={520} height={640}>
             <Layer>
-              <Rect x={0} y={0} width={520} height={640} fill="rgba(255,255,255,0.6)" />
+              <Rect x={0} y={0} width={520} height={640} fill="#ffffff" />
               {!selected && <Text x={160} y={300} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
               {selected && !textureImage && <Text x={145} y={300} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
             </Layer>
@@ -128,15 +186,13 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, o
               />
             )}
             <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
-              {selectedMaskFrame && selected && (
-                <Rect
+              {selectedMaskFrame && selectedOutlineImage && (
+                <KonvaImage
+                  image={selectedOutlineImage}
                   x={selectedMaskFrame.x}
                   y={selectedMaskFrame.y}
                   width={selectedMaskFrame.width}
                   height={selectedMaskFrame.height}
-                  stroke="#e05252"
-                  strokeWidth={2}
-                  dash={[10, 7]}
                 />
               )}
             </Layer>
@@ -159,10 +215,10 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, o
             <ZoomButton label="100%" onClick={() => setLayoutZoom(1)} />
           </div>
         </div>
-        <div className="checkerboard max-h-[760px] overflow-auto rounded-lg border border-line">
+        <div className="flex max-h-[760px] justify-center overflow-auto rounded-lg border border-line bg-white">
           <Stage width={Math.ceil(bounds.width * layoutZoom)} height={Math.ceil(bounds.height * layoutZoom)}>
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
-              <Rect x={0} y={0} width={bounds.width} height={bounds.height} fill="rgba(255,255,255,0.55)" />
+              <Rect x={0} y={0} width={bounds.width} height={bounds.height} fill="#ffffff" />
             </Layer>
             {textureImage &&
               pieces.map((piece) => (
@@ -297,16 +353,30 @@ function LayoutPieceTexture({
 }
 
 function PieceOutline({ piece, selected, onSelect }: { piece: Piece; selected: boolean; onSelect: () => void }) {
+  const mask = useLoadedImage(piece.mask_url);
+  const alphaMask = useLuminanceMaskImage(mask);
+  const outline = useMaskOutlineImage(alphaMask);
   return (
     <>
+      {outline && (
+        <KonvaImage
+          image={outline}
+          x={piece.source_x}
+          y={piece.source_y}
+          width={piece.width}
+          height={piece.height}
+          opacity={selected ? 1 : 0.55}
+          onClick={onSelect}
+          onTap={onSelect}
+        />
+      )}
       <Rect
         x={piece.source_x}
         y={piece.source_y}
         width={piece.width}
         height={piece.height}
-        stroke={selected ? "#e05252" : "#2563eb"}
-        strokeWidth={selected ? 4 : 2}
-        dash={selected ? [] : [9, 7]}
+        stroke="rgba(0,0,0,0)"
+        strokeWidth={1}
         onClick={onSelect}
         onTap={onSelect}
       />

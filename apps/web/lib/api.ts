@@ -72,7 +72,7 @@ export const api = {
     return request<{ job_id: string }>(`/api/projects/${projectId}/exports`, {
       method: "POST",
       headers: jsonHeaders,
-      body: JSON.stringify({ format: "zip", dpi: 300, transparent: true, include_outline: true, include_labels: true })
+      body: JSON.stringify({ format: "zip", dpi: 300, transparent: true, include_outline: false, include_labels: false })
     });
   },
   getJob(jobId: string) {
@@ -89,4 +89,3 @@ export async function waitForJob(jobId: string, onTick?: (job: Job) => void): Pr
     await new Promise((resolve) => setTimeout(resolve, 650));
   }
 }
-

@@ -21,6 +21,7 @@ from .image_ops import (
     make_offset_tile,
     render_layout,
     render_piece,
+    render_piece_svg,
 )
 from .jobs import create_job
 from .providers import get_provider
@@ -341,18 +342,22 @@ def _export_job(job_id: str, payload: dict) -> dict:
     export_dir = project_dir(project_id) / "exports" / f"export_{uuid.uuid4().hex[:8]}"
     export_dir.mkdir(parents=True, exist_ok=True)
     single_files = []
+    svg_files = []
     for piece in pieces:
         out = export_dir / f"{piece['id']}.png"
         render_piece(Path(piece["mask_path"]), texture_file(texture), piece["transform"], out)
         single_files.append(rel_path(out))
+        svg_out = export_dir / f"{piece['id']}.svg"
+        render_piece_svg(Path(piece["mask_path"]), svg_out)
+        svg_files.append(rel_path(svg_out))
     layout_path = export_dir / "layout_preview.png"
     render_layout(
         pieces,
         texture_file(texture),
         layout_path,
         canvas_size_from_pieces(pieces),
-        include_outline=bool(payload.get("include_outline", True)),
-        include_labels=bool(payload.get("include_labels", True)),
+        include_outline=bool(payload.get("include_outline", False)),
+        include_labels=bool(payload.get("include_labels", False)),
     )
     manifest = {
         "project_id": project_id,
@@ -362,7 +367,7 @@ def _export_job(job_id: str, payload: dict) -> dict:
             {"id": p["id"], "bbox": p["bbox"], "source_x": p["source_x"], "source_y": p["source_y"], "transform": p["transform"]}
             for p in pieces
         ],
-        "files": single_files + [rel_path(layout_path)],
+        "files": single_files + svg_files + [rel_path(layout_path)],
     }
     manifest_path = export_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
