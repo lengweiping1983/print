@@ -57,7 +57,50 @@ function useLuminanceMaskImage(image: HTMLImageElement | null) {
   return mask;
 }
 
-function useMaskOutlineImage(mask: HTMLCanvasElement | null) {
+function dilateCanvas(source: HTMLCanvasElement, radius: number): HTMLCanvasElement {
+  if (radius <= 0) return source;
+  const width = source.width;
+  const height = source.height;
+  const sCtx = source.getContext("2d")!;
+  const sData = sCtx.getImageData(0, 0, width, height).data;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+  const imageData = ctx.createImageData(width, height);
+  const tData = imageData.data;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let hasEdge = false;
+      const yStart = Math.max(0, y - radius);
+      const yEnd = Math.min(height - 1, y + radius);
+      for (let ny = yStart; ny <= yEnd && !hasEdge; ny++) {
+        const xStart = Math.max(0, x - radius);
+        const xEnd = Math.min(width - 1, x + radius);
+        const rowBase = ny * width;
+        for (let nx = xStart; nx <= xEnd; nx++) {
+          if (sData[(rowBase + nx) * 4 + 3] > 128) {
+            hasEdge = true;
+            break;
+          }
+        }
+      }
+      if (hasEdge) {
+        const idx = (y * width + x) * 4;
+        tData[idx] = 224;
+        tData[idx + 1] = 82;
+        tData[idx + 2] = 82;
+        tData[idx + 3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
+function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1) {
   const [outline, setOutline] = useState<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -107,8 +150,13 @@ function useMaskOutlineImage(mask: HTMLCanvasElement | null) {
       }
     }
     context.putImageData(outlineData, 0, 0);
-    setOutline(canvas);
-  }, [mask]);
+
+    if (strokeWidth > 1) {
+      setOutline(dilateCanvas(canvas, strokeWidth - 1));
+    } else {
+      setOutline(canvas);
+    }
+  }, [mask, strokeWidth]);
 
   return outline;
 }
@@ -150,16 +198,18 @@ type SinglePieceCalibrationProps = {
   selectedPieceId: string;
   textureUrl: string;
   showOutlines: boolean;
+  outlineWidth?: number;
   onToggleOutlines: (visible: boolean) => void;
+  onOutlineWidthChange?: (width: number) => void;
   onMovePiece: (piece: Piece, x: number, y: number) => void;
 };
 
-export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, onToggleOutlines, onMovePiece }: SinglePieceCalibrationProps) {
+export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece }: SinglePieceCalibrationProps) {
   const textureImage = useLoadedImage(textureUrl);
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
   const alphaMaskImage = useLuminanceMaskImage(maskImage);
-  const selectedOutlineImage = useMaskOutlineImage(alphaMaskImage);
+  const selectedOutlineImage = useMaskOutlineImage(alphaMaskImage, outlineWidth);
   const [pieceZoom, setPieceZoom] = useState(1);
   const selectedMaskFrame = useMemo(() => {
     if (!selected) return null;
@@ -181,6 +231,17 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
             <input type="checkbox" checked={showOutlines} onChange={(event) => onToggleOutlines(event.target.checked)} />
             显示线框
           </label>
+          {showOutlines && (
+            <select
+              className="rounded-lg border border-line bg-white px-1.5 py-1 text-xs font-semibold text-ink"
+              value={outlineWidth}
+              onChange={(event) => onOutlineWidthChange(Number(event.target.value))}
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => (
+                <option key={v} value={v}>{v}px</option>
+              ))}
+            </select>
+          )}
           <ZoomButton label="-" onClick={() => setPieceZoom((zoom) => clampZoom(zoom - 0.1))} />
           <span className="min-w-14 rounded-md bg-mist px-2 py-1 text-center text-xs text-slate-600">{Math.round(pieceZoom * 100)}%</span>
           <ZoomButton label="+" onClick={() => setPieceZoom((zoom) => clampZoom(zoom + 0.1))} />
@@ -228,10 +289,11 @@ type LayoutPreviewProps = {
   selectedPieceId: string;
   textureUrl: string;
   showOutlines: boolean;
+  outlineWidth?: number;
   onSelectPiece: (id: string) => void;
 };
 
-export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutlines, onSelectPiece }: LayoutPreviewProps) {
+export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, onSelectPiece }: LayoutPreviewProps) {
   const textureImage = useLoadedImage(textureUrl);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
   const bounds = useMemo(() => {
@@ -289,6 +351,7 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
                   key={`outline-${piece.id}`}
                   piece={piece}
                   selected={piece.id === selectedPieceId}
+                  outlineWidth={outlineWidth}
                   onSelect={() => onSelectPiece(piece.id)}
                 />
               ))}
@@ -404,10 +467,10 @@ function LayoutPieceTexture({
   );
 }
 
-function PieceOutline({ piece, selected, onSelect }: { piece: Piece; selected: boolean; onSelect: () => void }) {
+function PieceOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piece; selected: boolean; outlineWidth: number; onSelect: () => void }) {
   const mask = useLoadedImage(piece.mask_url);
   const alphaMask = useLuminanceMaskImage(mask);
-  const outline = useMaskOutlineImage(alphaMask);
+  const outline = useMaskOutlineImage(alphaMask, outlineWidth);
   return (
     <>
       {outline && (

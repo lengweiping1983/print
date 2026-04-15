@@ -32,6 +32,10 @@ npm install
 npm run dev
 ```
 
+生产部署（阿里云 ECS / 轻量服务器，直接使用 IP 访问，无需域名）：
+- 详见 [`DEPLOY.md`](DEPLOY.md)，包含完整的安装、配置、Nginx 反向代理和升级步骤。
+- **无需改动任何业务代码**（`db.py`、`image_ops.py` 等逻辑完全不用改）。
+
 旧的纯前端原型仍保留在根目录的 `index.html`、`app.js`、`styles.css` 中，可继续作为算法验证参考。
 
 ---

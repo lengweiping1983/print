@@ -40,6 +40,7 @@ export function StudioPage() {
   const [textureFileName, setTextureFileName] = useState("");
   const [textureViewMode, setTextureViewMode] = useState<"source" | "seamless">("source");
   const [showOutlines, setShowOutlines] = useState(true);
+  const [outlineWidth, setOutlineWidth] = useState(1);
 
   useEffect(() => {
     api
@@ -285,7 +286,9 @@ export function StudioPage() {
               selectedPieceId={selectedPieceId}
               textureUrl={activeTextureUrl}
               showOutlines={showOutlines}
+              outlineWidth={outlineWidth}
               onToggleOutlines={setShowOutlines}
+              onOutlineWidthChange={setOutlineWidth}
               onMovePiece={(piece, x, y) => {
                 setSelectedPieceId(piece.id);
                 void patchPiece(piece.id, { offset_x: Math.round(x), offset_y: Math.round(y) });
@@ -323,6 +326,7 @@ export function StudioPage() {
           selectedPieceId={selectedPieceId}
           textureUrl={activeTextureUrl}
           showOutlines={showOutlines}
+          outlineWidth={outlineWidth}
           onSelectPiece={setSelectedPieceId}
         />
       </div>
@@ -382,7 +386,7 @@ function FileField({
     <label className="mt-3 grid gap-2 text-sm font-semibold">
       {label}
       <input
-        className="rounded-lg border border-line bg-white px-3 py-2 text-sm"
+        className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm"
         type="file"
         accept={accept}
         onChange={(event) => {
