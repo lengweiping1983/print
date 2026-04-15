@@ -1,6 +1,7 @@
 "use client";
 
 import type { Piece } from "@print-studio/shared-types";
+import { PIECE_ROLE_LABELS } from "@/lib/labels";
 import "konva/lib/shapes/Image.js";
 import "konva/lib/shapes/Rect.js";
 import "konva/lib/shapes/Text.js";
@@ -339,7 +340,7 @@ function DesignRegionOutline({ piece, selected, outlineWidth, onSelect }: { piec
         onClick={onSelect}
         onTap={onSelect}
       />
-      <Text x={x + 8} y={y + 8} text={piece.transform.piece_role || piece.name} fill={selected ? "#e05252" : "#0f172a"} fontSize={24} onClick={onSelect} onTap={onSelect} />
+      <Text x={x + 8} y={y + 8} text={(piece.transform.piece_role ? PIECE_ROLE_LABELS[piece.transform.piece_role] || piece.transform.piece_role : "") || piece.name} fill={selected ? "#e05252" : "#0f172a"} fontSize={24} onClick={onSelect} onTap={onSelect} />
     </>
   );
 }

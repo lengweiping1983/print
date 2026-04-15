@@ -15,9 +15,12 @@
 2. 上传透明 PNG/WebP 裁片模板。
 3. 后端按 alpha 连通域拆裁片并保存 mask、bbox、坐标和 transform。
 4. 上传图案、衣服参考图，或用 prompt 生成本地占位纹理。
-5. 生成镜像/offset 无缝大布料图。
-6. 在 Web 工作台里调节单裁片平移、缩放、旋转、镜像。
-7. 导出整套预览、单裁片透明 PNG、manifest 和 ZIP 打样包。
+5. 可选择生成镜像/offset 无缝大布料图。
+6. 可选择启用全局一致坐标系，把整件衣服作为一张虚拟设计画布，再从同一张设计画布切出各裁片。
+7. 在 Web 工作台里调节单裁片平移、缩放、旋转、镜像或全局取样区域。
+8. 导出整套预览、单裁片透明 PNG、manifest 和 ZIP 打样包。
+
+全局坐标系、架构流程、技术实现和适用场景详见 [`GLOBAL_COORDINATE_SYSTEM.md`](GLOBAL_COORDINATE_SYSTEM.md)。
 
 启动方式：
 

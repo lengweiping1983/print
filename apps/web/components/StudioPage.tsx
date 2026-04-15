@@ -2,8 +2,9 @@
 
 import type { Asset, GlobalFitOptions, Job, Piece, PieceTransform, Project, Texture } from "@print-studio/shared-types";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, waitForJob } from "@/lib/api";
+import { PIECE_ROLE_LABELS, JOB_TYPE_LABELS, JOB_STATUS_LABELS } from "@/lib/labels";
 
 const SinglePieceCalibration = dynamic(() => import("./KonvaWorkspace").then((mod) => mod.SinglePieceCalibration), {
   ssr: false,
@@ -48,6 +49,7 @@ export function StudioPage() {
   const [globalOffsetY, setGlobalOffsetY] = useState(0);
   const [globalSymmetry, setGlobalSymmetry] = useState<"continuous" | "mirror">("continuous");
   const [globalAnchor, setGlobalAnchor] = useState("front_center");
+  const prevJobRef = useRef<Job | null>(null);
 
   useEffect(() => {
     api
@@ -58,6 +60,28 @@ export function StudioPage() {
       })
       .catch((error) => setNotice(error.message));
   }, []);
+
+  useEffect(() => {
+    if (!job) {
+      prevJobRef.current = null;
+      return;
+    }
+    const prev = prevJobRef.current;
+    if (prev && prev.id === job.id && prev.status === job.status && prev.progress === job.progress) {
+      return;
+    }
+    prevJobRef.current = job;
+    const typeLabel = (job.job_type && JOB_TYPE_LABELS[job.job_type]) || job.job_type || "任务";
+    if (job.status === "running") {
+      setNotice(`${typeLabel}进行中… ${Math.round(job.progress * 100)}%`);
+    } else if (job.status === "queued") {
+      setNotice(`${typeLabel}排队中…`);
+    } else if (job.status === "succeeded") {
+      setNotice(`${typeLabel}已完成`);
+    } else if (job.status === "failed") {
+      setNotice(`${typeLabel}失败`);
+    }
+  }, [job]);
 
   const selectedPiece = useMemo(
     () => pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0] ?? null,
@@ -299,11 +323,7 @@ export function StudioPage() {
             ) : (
               <p className="text-sm text-slate-500">上传图案或使用 Prompt 生成纹理。</p>
             )}
-            <div className="mt-4 rounded-lg bg-mist p-3 text-sm text-slate-600">
-              <div>任务：{job?.job_type ?? "空闲"}</div>
-              <div>状态：{job?.status ?? "ready"}</div>
-              <div>进度：{job ? Math.round(job.progress * 100) : 0}%</div>
-            </div>
+            <div className="mt-4 rounded-lg bg-mist p-3 text-sm text-slate-600">{notice}</div>
           </Panel>
 
           <Panel title="全局适配">
@@ -429,7 +449,7 @@ export function StudioPage() {
                   </button>
                   <div className="rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
                     <div>模式：{selectedPiece.transform.mode === "global_canvas" ? "全局设计画布" : "单片局部"}</div>
-                    <div>部位：{selectedPiece.transform.piece_role || "未识别"}</div>
+                    <div>部位：{PIECE_ROLE_LABELS[selectedPiece.transform.piece_role || ""] || selectedPiece.transform.piece_role || "未识别"}</div>
                     <div>置信度：{Math.round((selectedPiece.transform.fit_confidence ?? 0) * 100)}%</div>
                     {selectedPiece.transform.fit_note && <div>{selectedPiece.transform.fit_note}</div>}
                   </div>
@@ -450,7 +470,41 @@ export function StudioPage() {
           onSelectPiece={setSelectedPieceId}
         />
       </div>
+      <ToastNotice notice={notice} job={job} />
     </main>
+  );
+}
+
+function ToastNotice({ notice, job }: { notice: string; job: Job | null }) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!notice) {
+      setVisible(false);
+      return;
+    }
+    setVisible(true);
+    if (job?.status === "succeeded") {
+      const timer = setTimeout(() => setVisible(false), 30000);
+      return () => clearTimeout(timer);
+    }
+  }, [notice, job?.status, job?.job_type]);
+
+  if (!visible || !notice) return null;
+  return (
+    <div className="fixed bottom-6 right-6 z-50 flex max-w-sm items-start gap-3 rounded-lg border border-line bg-white px-4 py-3 text-sm shadow-panel">
+      <span className="mt-0.5 leading-5">{notice}</span>
+      <button
+        className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        onClick={() => setVisible(false)}
+        aria-label="关闭提示"
+      >
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 6 6 18" />
+          <path d="M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
