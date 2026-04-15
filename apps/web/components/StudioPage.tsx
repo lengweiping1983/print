@@ -325,13 +325,13 @@ export function StudioPage() {
                 <input type="range" min="0.2" max="4" step="0.05" value={globalTextureScale} onChange={(event) => setGlobalTextureScale(Number(event.target.value))} />
               </label>
               <div className="grid grid-cols-2 gap-2">
-                <label className="grid gap-1">
-                  <span className="font-semibold">偏移 X</span>
-                  <input className="rounded-lg border border-line px-2 py-1" type="number" value={globalOffsetX} onChange={(event) => setGlobalOffsetX(Number(event.target.value))} />
+                <label className="grid gap-1 text-sm">
+                  <span className="font-semibold">偏移 X: {globalOffsetX}</span>
+                  <input type="range" min="-2048" max="2048" step="1" value={globalOffsetX} onChange={(event) => setGlobalOffsetX(Number(event.target.value))} />
                 </label>
-                <label className="grid gap-1">
-                  <span className="font-semibold">偏移 Y</span>
-                  <input className="rounded-lg border border-line px-2 py-1" type="number" value={globalOffsetY} onChange={(event) => setGlobalOffsetY(Number(event.target.value))} />
+                <label className="grid gap-1 text-sm">
+                  <span className="font-semibold">偏移 Y: {globalOffsetY}</span>
+                  <input type="range" min="-2048" max="2048" step="1" value={globalOffsetY} onChange={(event) => setGlobalOffsetY(Number(event.target.value))} />
                 </label>
               </div>
               <label className="grid gap-1">

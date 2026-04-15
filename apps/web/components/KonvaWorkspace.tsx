@@ -166,8 +166,11 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
           <p className="m-0 mt-1 text-sm text-slate-500">拖动裁片中的布料，微调重点花位。</p>
         </div>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-ink ring-1 ring-line">
-            <input type="checkbox" checked={showOutlines} onChange={(event) => onToggleOutlines(event.target.checked)} />
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-ink ring-1 ring-line">
+            <input type="checkbox" className="peer sr-only" checked={showOutlines} onChange={(event) => onToggleOutlines(event.target.checked)} />
+            <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-jade">
+              <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
+            </span>
             显示线框
           </label>
           {showOutlines && (
@@ -347,7 +350,7 @@ function clampZoom(value: number) {
 
 function ZoomButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-ink ring-1 ring-line" onClick={onClick}>
+    <button className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-ink ring-1 ring-line" onClick={onClick}>
       {label}
     </button>
   );
@@ -400,7 +403,7 @@ function ClippedTextureLayer({
         height={imageHeight}
         offsetX={imageWidth / 2}
         offsetY={imageHeight / 2}
-        rotation={piece.transform.rotation}
+        rotation={globalMode ? piece.transform.design_rotation ?? 0 : piece.transform.rotation}
         scaleX={piece.transform.mirror_x ? -1 : 1}
         scaleY={piece.transform.mirror_y ? -1 : 1}
         draggable={draggable && !piece.transform.locked}
