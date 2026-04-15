@@ -19,9 +19,11 @@ from .image_ops import (
     make_layout_template,
     make_mirror_tile,
     make_offset_tile,
+    make_red_marker_mask,
     render_layout,
     render_piece,
     render_piece_svg,
+    write_piece_marker_masks,
 )
 from .jobs import create_job
 from .providers import get_provider
@@ -138,19 +140,28 @@ def import_template(project_id: str, asset_id: str = Form(...)) -> dict:
         raise HTTPException(status_code=400, detail="请上传 PNG/WebP 透明裁片模板，或白底排版原图 JPG/PNG/WebP。")
     source_path = storage_path(asset["path"])
     template_source = "alpha" if has_transparent_alpha(source_path) else "layout_image"
+    templates_dir = project_dir(project_id) / "templates"
     if template_source == "alpha":
         template_path = source_path
     else:
-        templates_dir = project_dir(project_id) / "templates"
         template_path = templates_dir / f"{asset_id}_template.png"
         make_layout_template(source_path, template_path)
+    red_marker_path = make_red_marker_mask(source_path, templates_dir / f"{asset_id}_red_markers.png")
 
     asset_metadata = loads(asset.get("metadata"), {})
-    asset_metadata.update({"template_source": template_source, "template_path": rel_path(template_path)})
+    asset_metadata.update(
+        {
+            "template_source": template_source,
+            "template_path": rel_path(template_path),
+            "red_marker_path": rel_path(red_marker_path) if red_marker_path else "",
+        }
+    )
     pieces_dir = project_dir(project_id) / "pieces"
-    for old in pieces_dir.glob("*_mask.png"):
+    for old in [*pieces_dir.glob("*_mask.png"), *pieces_dir.glob("*_markers.png")]:
         old.unlink()
     pieces = extract_alpha_components(template_path, pieces_dir)
+    red_marker_count = write_piece_marker_masks(pieces, red_marker_path)
+    asset_metadata["red_marker_count"] = red_marker_count
     with connect() as con:
         con.execute("update assets set metadata = ? where id = ? and project_id = ?", (dumps(asset_metadata), asset_id, project_id))
         con.execute("delete from pieces where project_id = ?", (project_id,))
