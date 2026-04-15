@@ -5,9 +5,14 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { api, waitForJob } from "@/lib/api";
 
-const Workspace = dynamic(() => import("./KonvaWorkspace").then((mod) => mod.KonvaWorkspace), {
+const SinglePieceCalibration = dynamic(() => import("./KonvaWorkspace").then((mod) => mod.SinglePieceCalibration), {
   ssr: false,
-  loading: () => <WorkspaceLoading />
+  loading: () => <SinglePieceLoading />
+});
+
+const LayoutPreview = dynamic(() => import("./KonvaWorkspace").then((mod) => mod.LayoutPreview), {
+  ssr: false,
+  loading: () => <LayoutPreviewLoading />
 });
 
 const emptyTransform: PieceTransform = {
@@ -175,7 +180,7 @@ export function StudioPage() {
         </div>
       </header>
 
-      <div className="grid grid-cols-[360px_minmax(0,1fr)_320px] gap-4 max-[1500px]:grid-cols-[330px_minmax(0,1fr)] max-[980px]:grid-cols-1">
+      <div className="grid grid-cols-[340px_minmax(720px,1fr)_minmax(520px,0.95fr)] gap-4 max-[1500px]:grid-cols-1">
         <aside className="space-y-4">
           <Panel title="素材">
             <FileField label="裁片模板 PNG/WebP 或白底排版原图 JPG/PNG/WebP" accept="image/png,image/webp,image/jpeg" selectedName={templateFileName} onFile={handleTemplate} />
@@ -204,69 +209,6 @@ export function StudioPage() {
                 上传素材：{assetSummary.total} 个（模板 {assetSummary.templateCount} / 图案 {assetSummary.patternCount} / 衣照 {assetSummary.garmentPhotoCount}）
               </div>
             </div>
-          </Panel>
-
-          <Panel title="裁片">
-            <p className="m-0 mb-3 text-xs text-slate-500">裁片数量：{pieces.length}</p>
-            <div className="max-h-[520px] space-y-2 overflow-auto">
-              {pieces.length === 0 && <p className="text-sm text-slate-500">上传透明模板后会显示裁片。</p>}
-              {pieces.map((piece) => (
-                <button
-                  key={piece.id}
-                  className={`grid w-full grid-cols-[64px_1fr] items-center gap-3 rounded-lg border p-2 text-left ${
-                    piece.id === selectedPieceId ? "border-coral bg-red-50" : "border-line bg-white"
-                  }`}
-                  onClick={() => setSelectedPieceId(piece.id)}
-                >
-                  <img className="checkerboard h-16 w-16 rounded-md object-contain" src={piece.mask_url} alt={piece.name} />
-                  <span>
-                    <strong className="block text-sm">{piece.name}</strong>
-                    <span className="text-xs text-slate-500">
-                      {piece.width} x {piece.height} | 面积 {piece.area.toLocaleString()}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </Panel>
-        </aside>
-
-        <Workspace
-          pieces={pieces}
-          selectedPieceId={selectedPieceId}
-          textureUrl={activeTextureUrl}
-          showOutlines={showOutlines}
-          onSelectPiece={setSelectedPieceId}
-          onToggleOutlines={setShowOutlines}
-          onMovePiece={(piece, x, y) => {
-            setSelectedPieceId(piece.id);
-            void patchPiece(piece.id, { offset_x: Math.round(x), offset_y: Math.round(y) });
-          }}
-        />
-
-        <aside className="space-y-4 max-[1500px]:col-span-2 max-[980px]:col-span-1">
-          <Panel title="当前裁片参数">
-            {selectedPiece ? (
-              <div className="space-y-4">
-                <Range label="平移 X" value={selectedPiece.transform.offset_x} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_x: value })} />
-                <Range label="平移 Y" value={selectedPiece.transform.offset_y} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_y: value })} />
-                <Range label="缩放" value={selectedPiece.transform.scale} min={0.2} max={6} step={0.01} onChange={(value) => patchSelected({ scale: value })} />
-                <Range label="旋转" value={selectedPiece.transform.rotation} min={-180} max={180} onChange={(value) => patchSelected({ rotation: value })} />
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <label className="rounded-lg border border-line p-2">
-                    <input type="checkbox" checked={selectedPiece.transform.mirror_x} onChange={(event) => patchSelected({ mirror_x: event.target.checked })} /> 左右镜像
-                  </label>
-                  <label className="rounded-lg border border-line p-2">
-                    <input type="checkbox" checked={selectedPiece.transform.mirror_y} onChange={(event) => patchSelected({ mirror_y: event.target.checked })} /> 上下镜像
-                  </label>
-                </div>
-                <button className="w-full rounded-lg bg-white px-4 py-2 font-semibold text-ink ring-1 ring-line" onClick={() => patchSelected(emptyTransform)}>
-                  重置当前裁片
-                </button>
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500">请选择裁片。</p>
-            )}
           </Panel>
 
           <Panel title="纹理">
@@ -315,6 +257,74 @@ export function StudioPage() {
             </div>
           </Panel>
         </aside>
+
+        <section className="grid grid-cols-[128px_minmax(0,1fr)] gap-4 max-[980px]:grid-cols-1">
+          <Panel title="裁片">
+            <p className="m-0 mb-3 text-xs text-slate-500">裁片数量：{pieces.length}</p>
+            <div className="max-h-[760px] space-y-2 overflow-auto pr-1">
+              {pieces.length === 0 && <p className="text-xs leading-5 text-slate-500">上传透明模板后会显示裁片。</p>}
+              {pieces.map((piece) => (
+                <button
+                  key={piece.id}
+                  title={`${piece.name}：${piece.width} x ${piece.height}`}
+                  className={`grid w-full justify-items-center gap-2 rounded-lg border p-2 text-center transition ${
+                    piece.id === selectedPieceId ? "border-coral bg-red-50" : "border-line bg-white hover:border-coral/60"
+                  }`}
+                  onClick={() => setSelectedPieceId(piece.id)}
+                >
+                  <img className="checkerboard h-20 w-20 rounded-md object-contain" src={piece.mask_url} alt={piece.name} />
+                  <span className="block max-w-full truncate text-xs font-semibold">{piece.name}</span>
+                </button>
+              ))}
+            </div>
+          </Panel>
+
+          <div className="space-y-4">
+            <SinglePieceCalibration
+              pieces={pieces}
+              selectedPieceId={selectedPieceId}
+              textureUrl={activeTextureUrl}
+              showOutlines={showOutlines}
+              onToggleOutlines={setShowOutlines}
+              onMovePiece={(piece, x, y) => {
+                setSelectedPieceId(piece.id);
+                void patchPiece(piece.id, { offset_x: Math.round(x), offset_y: Math.round(y) });
+              }}
+            />
+
+            <Panel title="当前裁片参数">
+              {selectedPiece ? (
+                <div className="grid gap-4 min-[980px]:grid-cols-2">
+                  <Range label="平移 X" value={selectedPiece.transform.offset_x} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_x: value })} />
+                  <Range label="平移 Y" value={selectedPiece.transform.offset_y} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_y: value })} />
+                  <Range label="缩放" value={selectedPiece.transform.scale} min={0.2} max={6} step={0.01} onChange={(value) => patchSelected({ scale: value })} />
+                  <Range label="旋转" value={selectedPiece.transform.rotation} min={-180} max={180} onChange={(value) => patchSelected({ rotation: value })} />
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <label className="rounded-lg border border-line p-2">
+                      <input type="checkbox" checked={selectedPiece.transform.mirror_x} onChange={(event) => patchSelected({ mirror_x: event.target.checked })} /> 左右镜像
+                    </label>
+                    <label className="rounded-lg border border-line p-2">
+                      <input type="checkbox" checked={selectedPiece.transform.mirror_y} onChange={(event) => patchSelected({ mirror_y: event.target.checked })} /> 上下镜像
+                    </label>
+                  </div>
+                  <button className="rounded-lg bg-white px-4 py-2 font-semibold text-ink ring-1 ring-line" onClick={() => patchSelected(emptyTransform)}>
+                    重置当前裁片
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">请选择裁片。</p>
+              )}
+            </Panel>
+          </div>
+        </section>
+
+        <LayoutPreview
+          pieces={pieces}
+          selectedPieceId={selectedPieceId}
+          textureUrl={activeTextureUrl}
+          showOutlines={showOutlines}
+          onSelectPiece={setSelectedPieceId}
+        />
       </div>
     </main>
   );
@@ -333,24 +343,27 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function WorkspaceLoading() {
+function SinglePieceLoading() {
   return (
-    <div className="grid min-h-[760px] grid-cols-[minmax(360px,0.9fr)_minmax(520px,1.1fr)] gap-4 max-[1280px]:grid-cols-1">
-      <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
-        <h2 className="m-0 text-lg font-semibold">单片校正</h2>
-        <p className="m-0 mt-1 text-sm text-slate-500">画布组件加载中...</p>
-        <div className="checkerboard mt-3 flex h-[640px] items-center justify-center rounded-lg border border-line text-sm text-slate-500">
-          正在准备裁片画布
-        </div>
-      </section>
-      <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
-        <h2 className="m-0 text-lg font-semibold">整套排版</h2>
-        <p className="m-0 mt-1 text-sm text-slate-500">画布组件加载中...</p>
-        <div className="checkerboard mt-3 flex h-[640px] items-center justify-center rounded-lg border border-line text-sm text-slate-500">
-          正在准备排版画布
-        </div>
-      </section>
-    </div>
+    <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
+      <h2 className="m-0 text-lg font-semibold">单片校正</h2>
+      <p className="m-0 mt-1 text-sm text-slate-500">画布组件加载中...</p>
+      <div className="checkerboard mt-3 flex h-[640px] items-center justify-center rounded-lg border border-line text-sm text-slate-500">
+        正在准备裁片画布
+      </div>
+    </section>
+  );
+}
+
+function LayoutPreviewLoading() {
+  return (
+    <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
+      <h2 className="m-0 text-lg font-semibold">整套排版</h2>
+      <p className="m-0 mt-1 text-sm text-slate-500">画布组件加载中...</p>
+      <div className="checkerboard mt-3 flex h-[640px] items-center justify-center rounded-lg border border-line text-sm text-slate-500">
+        正在准备排版画布
+      </div>
+    </section>
   );
 }
 
