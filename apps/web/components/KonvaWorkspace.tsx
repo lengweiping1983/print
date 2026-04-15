@@ -57,49 +57,6 @@ function useLuminanceMaskImage(image: HTMLImageElement | null) {
   return mask;
 }
 
-function dilateCanvas(source: HTMLCanvasElement, radius: number): HTMLCanvasElement {
-  if (radius <= 0) return source;
-  const width = source.width;
-  const height = source.height;
-  const sCtx = source.getContext("2d")!;
-  const sData = sCtx.getImageData(0, 0, width, height).data;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
-  const imageData = ctx.createImageData(width, height);
-  const tData = imageData.data;
-
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let hasEdge = false;
-      const yStart = Math.max(0, y - radius);
-      const yEnd = Math.min(height - 1, y + radius);
-      for (let ny = yStart; ny <= yEnd && !hasEdge; ny++) {
-        const xStart = Math.max(0, x - radius);
-        const xEnd = Math.min(width - 1, x + radius);
-        const rowBase = ny * width;
-        for (let nx = xStart; nx <= xEnd; nx++) {
-          if (sData[(rowBase + nx) * 4 + 3] > 128) {
-            hasEdge = true;
-            break;
-          }
-        }
-      }
-      if (hasEdge) {
-        const idx = (y * width + x) * 4;
-        tData[idx] = 224;
-        tData[idx + 1] = 82;
-        tData[idx + 2] = 82;
-        tData[idx + 3] = 255;
-      }
-    }
-  }
-  ctx.putImageData(imageData, 0, 0);
-  return canvas;
-}
-
 function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1) {
   const [outline, setOutline] = useState<HTMLCanvasElement | null>(null);
 
@@ -109,53 +66,35 @@ function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1) {
       return;
     }
 
-    const sourceContext = mask.getContext("2d");
-    if (!sourceContext) {
-      setOutline(null);
-      return;
-    }
-
-    const width = mask.width;
-    const height = mask.height;
-    const source = sourceContext.getImageData(0, 0, width, height).data;
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
+    const context = mask.getContext("2d");
     if (!context) {
       setOutline(null);
       return;
     }
 
-    const outlineData = context.createImageData(width, height);
-    const target = outlineData.data;
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const index = (y * width + x) * 4;
-        if (source[index + 3] < 32) continue;
-        const isEdge =
-          x === 0 ||
-          y === 0 ||
-          x === width - 1 ||
-          y === height - 1 ||
-          source[index - 4 + 3] < 32 ||
-          source[index + 4 + 3] < 32 ||
-          source[index - width * 4 + 3] < 32 ||
-          source[index + width * 4 + 3] < 32;
-        if (!isEdge) continue;
-        target[index] = 224;
-        target[index + 1] = 82;
-        target[index + 2] = 82;
-        target[index + 3] = 255;
+    const canvas = document.createElement("canvas");
+    canvas.width = mask.width;
+    canvas.height = mask.height;
+    const outlineContext = canvas.getContext("2d");
+    if (!outlineContext) {
+      setOutline(null);
+      return;
+    }
+
+    const radius = Math.max(1, Math.round(strokeWidth));
+    for (let y = -radius; y <= radius; y += 1) {
+      for (let x = -radius; x <= radius; x += 1) {
+        if (x * x + y * y > radius * radius) continue;
+        outlineContext.drawImage(mask, x, y);
       }
     }
-    context.putImageData(outlineData, 0, 0);
-
-    if (strokeWidth > 1) {
-      setOutline(dilateCanvas(canvas, strokeWidth - 1));
-    } else {
-      setOutline(canvas);
-    }
+    outlineContext.globalCompositeOperation = "source-in";
+    outlineContext.fillStyle = "#e05252";
+    outlineContext.fillRect(0, 0, canvas.width, canvas.height);
+    outlineContext.globalCompositeOperation = "destination-out";
+    outlineContext.drawImage(mask, 0, 0);
+    outlineContext.globalCompositeOperation = "source-over";
+    setOutline(canvas);
   }, [mask, strokeWidth]);
 
   return outline;
@@ -296,11 +235,15 @@ type LayoutPreviewProps = {
 export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, onSelectPiece }: LayoutPreviewProps) {
   const textureImage = useLoadedImage(textureUrl);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
+  const [previewMode, setPreviewMode] = useState<"layout" | "design">("layout");
   const bounds = useMemo(() => {
+    if (previewMode === "design" && textureImage) {
+      return { width: Math.max(1200, textureImage.naturalWidth), height: Math.max(760, textureImage.naturalHeight) };
+    }
     const width = Math.max(1200, ...pieces.map((piece) => piece.source_x + piece.width + 80), 1200);
     const height = Math.max(760, ...pieces.map((piece) => piece.source_y + piece.height + 80), 760);
     return { width, height };
-  }, [pieces]);
+  }, [pieces, previewMode, textureImage]);
   const fitZoom = useMemo(() => {
     const maxWidth = 980;
     const maxHeight = 720;
@@ -316,12 +259,15 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h2 className="m-0 text-lg font-semibold">整套排版</h2>
-          <p className="m-0 mt-1 text-sm text-slate-500">按模板原始坐标回排，导出时保持同一坐标系。</p>
+          <h2 className="m-0 text-lg font-semibold">{previewMode === "design" ? "全局设计画布" : "整套排版"}</h2>
+          <p className="m-0 mt-1 text-sm text-slate-500">
+            {previewMode === "design" ? "查看裁片在虚拟衣服平面中的取样区域。" : "按模板原始坐标回排，导出时保持同一坐标系。"}
+          </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="rounded-md bg-mist px-2 py-1 text-xs text-slate-600">{pieces.length} 个裁片</span>
-          <ZoomButton label="适配" onClick={() => setLayoutZoom(fitZoom)} />
+          <ZoomButton label="排版" onClick={() => setPreviewMode("layout")} />
+          <ZoomButton label="设计画布" onClick={() => setPreviewMode("design")} />
           <ZoomButton label="-" onClick={() => setLayoutZoom((zoom) => clampZoom(zoom - 0.05))} />
           <span className="min-w-14 rounded-md bg-mist px-2 py-1 text-center text-xs text-slate-600">{Math.round(layoutZoom * 100)}%</span>
           <ZoomButton label="+" onClick={() => setLayoutZoom((zoom) => clampZoom(zoom + 0.05))} />
@@ -332,8 +278,10 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
         <Stage width={Math.ceil(bounds.width * layoutZoom)} height={Math.ceil(bounds.height * layoutZoom)}>
           <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
             <Rect x={0} y={0} width={bounds.width} height={bounds.height} fill="#ffffff" />
+            {previewMode === "design" && textureImage && <KonvaImage image={textureImage} x={0} y={0} width={bounds.width} height={bounds.height} />}
           </Layer>
-          {textureImage &&
+          {previewMode === "layout" &&
+            textureImage &&
             pieces.map((piece) => (
               <LayoutPieceTexture
                 key={`texture-${piece.id}`}
@@ -344,7 +292,14 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
                 onSelect={() => onSelectPiece(piece.id)}
               />
             ))}
-          {showOutlines && (
+          {previewMode === "design" && (
+            <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
+              {pieces.map((piece) => (
+                <DesignRegionOutline key={`design-${piece.id}`} piece={piece} selected={piece.id === selectedPieceId} outlineWidth={outlineWidth} onSelect={() => onSelectPiece(piece.id)} />
+              ))}
+            </Layer>
+          )}
+          {previewMode === "layout" && showOutlines && (
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
               {pieces.map((piece) => (
                 <PieceOutline
@@ -360,6 +315,29 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
         </Stage>
       </div>
     </section>
+  );
+}
+
+function DesignRegionOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piece; selected: boolean; outlineWidth: number; onSelect: () => void }) {
+  const x = piece.transform.design_x ?? piece.source_x;
+  const y = piece.transform.design_y ?? piece.source_y;
+  const width = piece.transform.design_width ?? piece.width;
+  const height = piece.transform.design_height ?? piece.height;
+  return (
+    <>
+      <Rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        stroke={selected ? "#e05252" : "#2563eb"}
+        strokeWidth={outlineWidth}
+        dash={selected ? [] : [12, 8]}
+        onClick={onSelect}
+        onTap={onSelect}
+      />
+      <Text x={x + 8} y={y + 8} text={piece.transform.piece_role || piece.name} fill={selected ? "#e05252" : "#0f172a"} fontSize={24} onClick={onSelect} onTap={onSelect} />
+    </>
   );
 }
 
@@ -395,15 +373,27 @@ function ClippedTextureLayer({
   onSelect?: () => void;
 }) {
   const frameScale = frame.width / Math.max(1, piece.width);
-  const imageWidth = Math.max(1, textureImage.naturalWidth * piece.transform.scale * frameScale);
-  const imageHeight = Math.max(1, textureImage.naturalHeight * piece.transform.scale * frameScale);
-  const imageCenterX = frame.x + frame.width / 2 + piece.transform.offset_x * frameScale;
-  const imageCenterY = frame.y + frame.height / 2 + piece.transform.offset_y * frameScale;
+  const globalMode = piece.transform.mode === "global_canvas";
+  const cropX = wrapCropCoordinate((piece.transform.design_x ?? 0) + piece.transform.offset_x, textureImage.naturalWidth);
+  const cropY = wrapCropCoordinate((piece.transform.design_y ?? 0) + piece.transform.offset_y, textureImage.naturalHeight);
+  const crop = globalMode
+    ? {
+        x: cropX,
+        y: cropY,
+        width: Math.max(1, piece.transform.design_width ?? piece.width),
+        height: Math.max(1, piece.transform.design_height ?? piece.height)
+      }
+    : undefined;
+  const imageWidth = globalMode ? frame.width : Math.max(1, textureImage.naturalWidth * piece.transform.scale * frameScale);
+  const imageHeight = globalMode ? frame.height : Math.max(1, textureImage.naturalHeight * piece.transform.scale * frameScale);
+  const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : piece.transform.offset_x * frameScale);
+  const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : piece.transform.offset_y * frameScale);
 
   return (
     <Layer scaleX={zoom} scaleY={zoom}>
       <KonvaImage
         image={textureImage}
+        crop={crop}
         x={imageCenterX}
         y={imageCenterY}
         width={imageWidth}
@@ -418,10 +408,18 @@ function ClippedTextureLayer({
         onTap={onSelect}
         onDragEnd={(event) => {
           if (!onMove) return;
-          onMove(
-            Math.round((event.target.x() - (frame.x + frame.width / 2)) / frameScale),
-            Math.round((event.target.y() - (frame.y + frame.height / 2)) / frameScale)
-          );
+          if (globalMode) {
+            const deltaX = Math.round((event.target.x() - (frame.x + frame.width / 2)) / frameScale);
+            const deltaY = Math.round((event.target.y() - (frame.y + frame.height / 2)) / frameScale);
+            event.target.x(frame.x + frame.width / 2);
+            event.target.y(frame.y + frame.height / 2);
+            onMove(piece.transform.offset_x - deltaX, piece.transform.offset_y - deltaY);
+          } else {
+            onMove(
+              Math.round((event.target.x() - (frame.x + frame.width / 2)) / frameScale),
+              Math.round((event.target.y() - (frame.y + frame.height / 2)) / frameScale)
+            );
+          }
         }}
       />
       <KonvaImage
@@ -436,6 +434,11 @@ function ClippedTextureLayer({
       />
     </Layer>
   );
+}
+
+function wrapCropCoordinate(value: number, size: number) {
+  if (!Number.isFinite(value) || size <= 0) return 0;
+  return ((value % size) + size) % size;
 }
 
 function LayoutPieceTexture({

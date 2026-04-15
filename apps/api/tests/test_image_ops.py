@@ -10,6 +10,7 @@ from app.image_ops import (
     marker_path_for_mask,
     render_layout,
     render_piece,
+    render_piece_from_design_canvas,
     write_piece_marker_masks,
 )
 
@@ -101,3 +102,26 @@ def test_render_layout_with_texture(tmp_path: Path) -> None:
     assert out.exists()
     assert Image.open(out).size == (120, 100)
 
+
+def test_render_piece_from_design_canvas_samples_shared_region(tmp_path: Path) -> None:
+    mask = tmp_path / "piece_mask.png"
+    Image.new("L", (20, 20), 255).save(mask)
+    design = tmp_path / "design.png"
+    image = Image.new("RGBA", (80, 40), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 39, 39), fill=(255, 0, 0, 255))
+    draw.rectangle((40, 0, 79, 39), fill=(0, 80, 255, 255))
+    image.save(design)
+
+    out = tmp_path / "piece.png"
+    render_piece_from_design_canvas(
+        mask,
+        design,
+        {"mode": "global_canvas", "design_x": 40, "design_y": 0, "design_width": 20, "design_height": 20},
+        out,
+    )
+
+    rendered = Image.open(out).convert("RGBA")
+    pixel = rendered.getpixel((10, 10))
+    assert pixel[2] > 200
+    assert pixel[0] < 50

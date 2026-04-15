@@ -42,6 +42,16 @@ class PieceTransform(BaseModel):
     mirror_y: bool = False
     texture_id: str = ""
     locked: bool = False
+    mode: Literal["local", "global_canvas"] = "local"
+    design_x: float = 0
+    design_y: float = 0
+    design_width: float = 0
+    design_height: float = 0
+    design_rotation: float = 0
+    grainline_angle: float = 0
+    piece_role: str = ""
+    fit_confidence: float = 0
+    fit_note: str = ""
 
 
 class PieceOut(BaseModel):
@@ -81,6 +91,28 @@ class SeamlessRequest(BaseModel):
     mode: Literal["mirror", "offset"] = "mirror"
     width: int = 4096
     height: int = 4096
+
+
+class AutoMapRequest(BaseModel):
+    garment_type: Literal["unknown", "t_shirt", "shirt"] = "unknown"
+    strategy: str = "heuristic_v1"
+    apply: bool = True
+
+
+class GlobalFitRequest(BaseModel):
+    garment_type: Literal["unknown", "t_shirt", "shirt"] = "unknown"
+    strategy: str = "continuous_unified_v1"
+    apply: bool = True
+    canvas_width: int = 0
+    canvas_height: int = 0
+    texture_scale: float = 1
+    texture_angle: float = 0
+    texture_offset_x: float = 0
+    texture_offset_y: float = 0
+    tile: bool = True
+    mirror: bool = False
+    anchor: str = "front_center"
+    symmetry: Literal["continuous", "mirror"] = "continuous"
 
 
 class TextureOut(BaseModel):

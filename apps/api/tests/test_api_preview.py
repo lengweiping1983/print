@@ -62,6 +62,54 @@ def test_jpeg_layout_image_import_creates_piece_masks() -> None:
         assert any(path.exists() for path in marker_paths)
 
 
+def test_global_fit_updates_piece_transforms_and_preview() -> None:
+    client = TestClient(app)
+    with client:
+        project = client.post("/api/projects", json={"name": "global fit"}).json()
+        mask = Image.new("RGBA", (220, 120), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(mask)
+        draw.rectangle((10, 12, 90, 110), fill=(255, 255, 255, 255))
+        draw.rectangle((120, 12, 200, 110), fill=(255, 255, 255, 255))
+        template_buf = BytesIO()
+        mask.save(template_buf, format="PNG")
+        template_buf.seek(0)
+        template = client.post(
+            f"/api/projects/{project['id']}/assets",
+            data={"kind": "template"},
+            files={"file": ("template.png", template_buf, "image/png")},
+        ).json()
+        imported = client.post(f"/api/projects/{project['id']}/templates/import", data={"asset_id": template["id"]}).json()
+        assert len(imported["pieces"]) == 2
+
+        texture = Image.new("RGBA", (64, 64), (24, 96, 180, 255))
+        texture_buf = BytesIO()
+        texture.save(texture_buf, format="PNG")
+        texture_buf.seek(0)
+        asset = client.post(
+            f"/api/projects/{project['id']}/assets",
+            data={"kind": "pattern"},
+            files={"file": ("water.png", texture_buf, "image/png")},
+        ).json()
+        texture_job = client.post(
+            f"/api/projects/{project['id']}/textures/generate",
+            json={"source_asset_id": asset["id"], "source_type": "pattern", "provider": "local", "model": "local-copy"},
+        ).json()["job_id"]
+        texture_done = wait_job(client, texture_job)
+        texture_id = texture_done["output"]["texture"]["id"]
+
+        fit_job = client.post(
+            f"/api/projects/{project['id']}/textures/{texture_id}/fit-global",
+            json={"garment_type": "shirt", "texture_scale": 1, "texture_angle": 15, "symmetry": "continuous"},
+        ).json()["job_id"]
+        fit_done = wait_job(client, fit_job)
+
+        assert fit_done["status"] == "succeeded"
+        assert fit_done["output"]["fit_preview_url"].endswith(".png")
+        pieces = client.get(f"/api/projects/{project['id']}/pieces").json()
+        assert all(piece["transform"]["mode"] == "global_canvas" for piece in pieces)
+        assert all(piece["transform"]["design_width"] > 0 for piece in pieces)
+
+
 def wait_job(client: TestClient, job_id: str) -> dict:
     for _ in range(80):
         job = client.get(f"/api/jobs/{job_id}").json()
@@ -69,4 +117,3 @@ def wait_job(client: TestClient, job_id: str) -> dict:
             return job
         time.sleep(0.1)
     raise AssertionError("job did not finish")
-

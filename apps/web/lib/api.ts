@@ -1,4 +1,4 @@
-import type { Asset, Job, Piece, PieceTransform, Project, Texture } from "@print-studio/shared-types";
+import type { Asset, GlobalFitOptions, Job, Piece, PieceTransform, Project, Texture } from "@print-studio/shared-types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
@@ -58,6 +58,20 @@ export const api = {
       method: "POST",
       headers: jsonHeaders,
       body: JSON.stringify({ mode, width: 4096, height: 4096 })
+    });
+  },
+  autoMapLayout(projectId: string, garmentType: "unknown" | "t_shirt" | "shirt") {
+    return request<{ job_id: string }>(`/api/projects/${projectId}/layout/auto-map`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ garment_type: garmentType, strategy: "heuristic_v1", apply: true })
+    });
+  },
+  fitGlobalTexture(projectId: string, textureId: string, options: GlobalFitOptions) {
+    return request<{ job_id: string }>(`/api/projects/${projectId}/textures/${textureId}/fit-global`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ ...options, strategy: "continuous_unified_v1", apply: true })
     });
   },
   listTextures(projectId: string) {

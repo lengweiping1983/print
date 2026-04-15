@@ -1,6 +1,6 @@
 "use client";
 
-import type { Asset, Job, Piece, PieceTransform, Project, Texture } from "@print-studio/shared-types";
+import type { Asset, GlobalFitOptions, Job, Piece, PieceTransform, Project, Texture } from "@print-studio/shared-types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { api, waitForJob } from "@/lib/api";
@@ -40,7 +40,14 @@ export function StudioPage() {
   const [textureFileName, setTextureFileName] = useState("");
   const [textureViewMode, setTextureViewMode] = useState<"source" | "seamless">("source");
   const [showOutlines, setShowOutlines] = useState(true);
-  const [outlineWidth, setOutlineWidth] = useState(1);
+  const [outlineWidth, setOutlineWidth] = useState(5);
+  const [garmentType, setGarmentType] = useState<"unknown" | "t_shirt" | "shirt">("unknown");
+  const [textureAngle, setTextureAngle] = useState(0);
+  const [globalTextureScale, setGlobalTextureScale] = useState(1);
+  const [globalOffsetX, setGlobalOffsetX] = useState(0);
+  const [globalOffsetY, setGlobalOffsetY] = useState(0);
+  const [globalSymmetry, setGlobalSymmetry] = useState<"continuous" | "mirror">("continuous");
+  const [globalAnchor, setGlobalAnchor] = useState("front_center");
 
   useEffect(() => {
     api
@@ -69,6 +76,7 @@ export function StudioPage() {
       ? activeTexture.seamless_url
       : activeTexture.source_url
     : "";
+  const globalPieceCount = pieces.filter((piece) => piece.transform.mode === "global_canvas").length;
 
   async function upload(kind: string, file: File) {
     if (!project) return;
@@ -126,6 +134,46 @@ export function StudioPage() {
       setTextures((current) => [texture, ...current.filter((item) => item.id !== texture.id)]);
       setTextureViewMode("seamless");
       setNotice("无缝大布料图已生成。");
+    } catch (error) {
+      setNotice(readError(error));
+    }
+  }
+
+  async function handleAutoMap() {
+    if (!project) return;
+    try {
+      setNotice("正在识别裁片部位并建立全局设计坐标...");
+      const created = await api.autoMapLayout(project.id, garmentType);
+      const done = await waitForJob(created.job_id, setJob);
+      setPieces((done.output.pieces as Piece[]) ?? (await api.listPieces(project.id)));
+      setNotice("裁片已映射到全局设计画布，可继续适配纹理。");
+    } catch (error) {
+      setNotice(readError(error));
+    }
+  }
+
+  async function handleGlobalFit() {
+    if (!project || !activeTexture) return;
+    try {
+      setNotice("正在生成全局一致纹理画布并裁切预览...");
+      const options: GlobalFitOptions = {
+        garment_type: garmentType,
+        texture_scale: globalTextureScale,
+        texture_angle: textureAngle,
+        texture_offset_x: globalOffsetX,
+        texture_offset_y: globalOffsetY,
+        tile: true,
+        mirror: globalSymmetry === "mirror",
+        symmetry: globalSymmetry,
+        anchor: globalAnchor
+      };
+      const created = await api.fitGlobalTexture(project.id, activeTexture.id, options);
+      const done = await waitForJob(created.job_id, setJob);
+      const texture = done.output.texture as Texture;
+      setTextures((current) => [texture, ...current.filter((item) => item.id !== texture.id)]);
+      setPieces((done.output.pieces as Piece[]) ?? (await api.listPieces(project.id)));
+      setTextureViewMode("seamless");
+      setNotice("全局一致适配已完成，可切换到设计画布查看裁片取样区域。");
     } catch (error) {
       setNotice(readError(error));
     }
@@ -257,6 +305,66 @@ export function StudioPage() {
               <div>进度：{job ? Math.round(job.progress * 100) : 0}%</div>
             </div>
           </Panel>
+
+          <Panel title="全局适配">
+            <div className="grid gap-3 text-sm">
+              <label className="grid gap-1">
+                <span className="font-semibold">衣服类型</span>
+                <select className="rounded-lg border border-line bg-white px-3 py-2" value={garmentType} onChange={(event) => setGarmentType(event.target.value as typeof garmentType)}>
+                  <option value="unknown">未知</option>
+                  <option value="t_shirt">T 恤</option>
+                  <option value="shirt">衬衫</option>
+                </select>
+              </label>
+              <label className="grid gap-1">
+                <span className="font-semibold">全局纹理方向：{textureAngle}°</span>
+                <input type="range" min="-180" max="180" value={textureAngle} onChange={(event) => setTextureAngle(Number(event.target.value))} />
+              </label>
+              <label className="grid gap-1">
+                <span className="font-semibold">纹理缩放：{globalTextureScale.toFixed(2)}</span>
+                <input type="range" min="0.2" max="4" step="0.05" value={globalTextureScale} onChange={(event) => setGlobalTextureScale(Number(event.target.value))} />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="grid gap-1">
+                  <span className="font-semibold">偏移 X</span>
+                  <input className="rounded-lg border border-line px-2 py-1" type="number" value={globalOffsetX} onChange={(event) => setGlobalOffsetX(Number(event.target.value))} />
+                </label>
+                <label className="grid gap-1">
+                  <span className="font-semibold">偏移 Y</span>
+                  <input className="rounded-lg border border-line px-2 py-1" type="number" value={globalOffsetY} onChange={(event) => setGlobalOffsetY(Number(event.target.value))} />
+                </label>
+              </div>
+              <label className="grid gap-1">
+                <span className="font-semibold">左右规则</span>
+                <select className="rounded-lg border border-line bg-white px-3 py-2" value={globalSymmetry} onChange={(event) => setGlobalSymmetry(event.target.value as typeof globalSymmetry)}>
+                  <option value="continuous">连续统一</option>
+                  <option value="mirror">左右镜像</option>
+                </select>
+              </label>
+              <label className="grid gap-1">
+                <span className="font-semibold">主视觉中心</span>
+                <select className="rounded-lg border border-line bg-white px-3 py-2" value={globalAnchor} onChange={(event) => setGlobalAnchor(event.target.value)}>
+                  <option value="front_center">前胸中心</option>
+                  <option value="back_center">后背中心</option>
+                  <option value="left_chest">左胸</option>
+                  <option value="right_chest">右胸</option>
+                  <option value="hem_center">下摆中心</option>
+                  <option value="sleeve_center">袖中线</option>
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={handleAutoMap}>
+                  识别裁片
+                </button>
+                <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || pieces.length === 0} onClick={handleGlobalFit}>
+                  自动适配纹理
+                </button>
+              </div>
+              <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
+                已启用全局坐标：{globalPieceCount}/{pieces.length} 个裁片。水纹、迷彩和花纹建议使用连续统一；logo、鱼和文字先按主视觉中心定位，再人工微调。
+              </p>
+            </div>
+          </Panel>
         </aside>
 
         <section className="grid grid-cols-[128px_minmax(0,1fr)] gap-4 max-[980px]:grid-cols-1">
@@ -302,6 +410,12 @@ export function StudioPage() {
                   <Range label="平移 Y" value={selectedPiece.transform.offset_y} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_y: value })} />
                   <Range label="缩放" value={selectedPiece.transform.scale} min={0.2} max={6} step={0.01} onChange={(value) => patchSelected({ scale: value })} />
                   <Range label="旋转" value={selectedPiece.transform.rotation} min={-180} max={180} onChange={(value) => patchSelected({ rotation: value })} />
+                  {selectedPiece.transform.mode === "global_canvas" && (
+                    <>
+                      <Range label="全局 X" value={selectedPiece.transform.design_x ?? 0} min={0} max={4096} onChange={(value) => patchSelected({ design_x: value })} />
+                      <Range label="全局 Y" value={selectedPiece.transform.design_y ?? 0} min={0} max={4096} onChange={(value) => patchSelected({ design_y: value })} />
+                    </>
+                  )}
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <label className="rounded-lg border border-line p-2">
                       <input type="checkbox" checked={selectedPiece.transform.mirror_x} onChange={(event) => patchSelected({ mirror_x: event.target.checked })} /> 左右镜像
@@ -313,6 +427,12 @@ export function StudioPage() {
                   <button className="rounded-lg bg-white px-4 py-2 font-semibold text-ink ring-1 ring-line" onClick={() => patchSelected(emptyTransform)}>
                     重置当前裁片
                   </button>
+                  <div className="rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
+                    <div>模式：{selectedPiece.transform.mode === "global_canvas" ? "全局设计画布" : "单片局部"}</div>
+                    <div>部位：{selectedPiece.transform.piece_role || "未识别"}</div>
+                    <div>置信度：{Math.round((selectedPiece.transform.fit_confidence ?? 0) * 100)}%</div>
+                    {selectedPiece.transform.fit_note && <div>{selectedPiece.transform.fit_note}</div>}
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-slate-500">请选择裁片。</p>

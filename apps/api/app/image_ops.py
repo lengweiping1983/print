@@ -319,6 +319,8 @@ def make_offset_tile(source_path: Path, out_path: Path, width: int, height: int)
 
 
 def render_piece(mask_path: Path, texture_path: Path, transform: dict, out_path: Path) -> Path:
+    if transform.get("mode") == "global_canvas":
+        return render_piece_from_design_canvas(mask_path, texture_path, transform, out_path)
     mask = Image.open(mask_path).convert("L")
     texture = Image.open(texture_path).convert("RGBA")
     canvas = Image.new("RGBA", mask.size, (0, 0, 0, 0))
@@ -346,6 +348,52 @@ def render_piece(mask_path: Path, texture_path: Path, transform: dict, out_path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out_path)
     return out_path
+
+
+def render_piece_from_design_canvas(mask_path: Path, design_canvas_path: Path, transform: dict, out_path: Path) -> Path:
+    mask = Image.open(mask_path).convert("L")
+    with Image.open(design_canvas_path).convert("RGBA") as design_canvas:
+        design_x = float(transform.get("design_x", 0) or 0) + float(transform.get("offset_x", 0) or 0)
+        design_y = float(transform.get("design_y", 0) or 0) + float(transform.get("offset_y", 0) or 0)
+        design_w = float(transform.get("design_width", 0) or mask.width)
+        design_h = float(transform.get("design_height", 0) or mask.height)
+        design_rotation = float(transform.get("design_rotation", 0) or 0)
+        sample = sample_design_region(design_canvas, design_x, design_y, design_w, design_h, mask.size)
+        if transform.get("mirror_x"):
+            sample = ImageOps.mirror(sample)
+        if transform.get("mirror_y"):
+            sample = ImageOps.flip(sample)
+        if design_rotation:
+            rotated = sample.rotate(design_rotation, expand=False, resample=Image.Resampling.BICUBIC)
+            sample = rotated
+    sample.putalpha(mask)
+    composite_piece_markers(sample, mask_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    sample.save(out_path)
+    return out_path
+
+
+def sample_design_region(
+    design_canvas: Image.Image,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    out_size: tuple[int, int],
+) -> Image.Image:
+    width = max(1, float(width))
+    height = max(1, float(height))
+    crop = Image.new("RGBA", (max(1, int(round(width))), max(1, int(round(height)))), (0, 0, 0, 0))
+    start_x = int(math.floor(x))
+    start_y = int(math.floor(y))
+    offset_x = start_x % max(1, design_canvas.width)
+    offset_y = start_y % max(1, design_canvas.height)
+    for py in range(-offset_y, crop.height, design_canvas.height):
+        for px in range(-offset_x, crop.width, design_canvas.width):
+            crop.alpha_composite(design_canvas, (px, py))
+    if crop.size != out_size:
+        crop = crop.resize(out_size, Image.Resampling.LANCZOS)
+    return crop
 
 
 def composite_piece_markers(canvas: Image.Image, mask_path: Path) -> None:

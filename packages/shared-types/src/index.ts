@@ -34,6 +34,49 @@ export type PieceTransform = {
   mirror_y: boolean;
   texture_id: string;
   locked: boolean;
+  mode?: "local" | "global_canvas";
+  design_x?: number;
+  design_y?: number;
+  design_width?: number;
+  design_height?: number;
+  design_rotation?: number;
+  grainline_angle?: number;
+  piece_role?: string;
+  fit_confidence?: number;
+  fit_note?: string;
+};
+
+export type DesignCanvas = {
+  width: number;
+  height: number;
+  unit: string;
+  base_size: string;
+  global_texture_angle: number;
+  texture_scale: number;
+  texture_offset_x: number;
+  texture_offset_y: number;
+  tile: boolean;
+  mirror: boolean;
+  symmetry: "continuous" | "mirror";
+  anchor: string;
+  design_anchors: Record<string, { x: number; y: number }>;
+  size_mapping: Record<string, unknown>;
+};
+
+export type GlobalFitOptions = {
+  garment_type: "unknown" | "t_shirt" | "shirt";
+  strategy?: string;
+  apply?: boolean;
+  canvas_width?: number;
+  canvas_height?: number;
+  texture_scale: number;
+  texture_angle: number;
+  texture_offset_x: number;
+  texture_offset_y: number;
+  tile: boolean;
+  mirror: boolean;
+  anchor: string;
+  symmetry: "continuous" | "mirror";
 };
 
 export type Piece = {
@@ -88,4 +131,3 @@ export type Job = {
   created_at: string;
   updated_at: string;
 };
-

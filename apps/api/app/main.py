@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import DEFAULT_DPI, PROJECTS_DIR, STORAGE_DIR
 from .db import connect, dumps, init_db, loads, now_iso, rel_path, row_to_dict, storage_path
+from .design_ops import build_design_texture_canvas, build_fit_preview
 from .image_ops import (
     extract_alpha_components,
     has_transparent_alpha,
@@ -26,10 +27,13 @@ from .image_ops import (
     write_piece_marker_masks,
 )
 from .jobs import create_job
+from .layout_ops import auto_map_pieces, build_design_canvas_config, merge_mapping_into_transform
 from .providers import get_provider
 from .schemas import (
     AssetOut,
+    AutoMapRequest,
     ExportRequest,
+    GlobalFitRequest,
     JobOut,
     PieceOut,
     PieceTransform,
@@ -219,6 +223,13 @@ def update_piece(project_id: str, piece_id: str, payload: PieceTransform) -> dic
     return get_piece_dict(piece_id, project_id)
 
 
+@app.post("/api/projects/{project_id}/layout/auto-map")
+def auto_map_layout(project_id: str, payload: AutoMapRequest) -> dict:
+    ensure_project(project_id)
+    job_id = create_job(project_id, "layout_auto_map", payload.model_dump(), _auto_map_job)
+    return {"job_id": job_id}
+
+
 @app.post("/api/projects/{project_id}/textures/generate")
 def generate_texture(project_id: str, payload: TextureGenerateRequest) -> dict:
     ensure_project(project_id)
@@ -234,6 +245,18 @@ def create_seamless(project_id: str, texture_id: str, payload: SeamlessRequest) 
         "texture_seamless",
         {"texture_id": texture_id, **payload.model_dump()},
         _seamless_job,
+    )
+    return {"job_id": job_id}
+
+
+@app.post("/api/projects/{project_id}/textures/{texture_id}/fit-global")
+def fit_global_texture(project_id: str, texture_id: str, payload: GlobalFitRequest) -> dict:
+    ensure_project(project_id)
+    job_id = create_job(
+        project_id,
+        "texture_fit_global",
+        {"texture_id": texture_id, **payload.model_dump()},
+        _fit_global_job,
     )
     return {"job_id": job_id}
 
@@ -336,6 +359,56 @@ def _seamless_job(job_id: str, payload: dict) -> dict:
     return {"texture": _texture_out(get_texture_row(texture["id"], project_id))}
 
 
+def _auto_map_job(job_id: str, payload: dict) -> dict:
+    project_id = _job_project(job_id)
+    pieces = raw_pieces(project_id)
+    design_canvas = build_design_canvas_config(pieces, payload)
+    mappings = auto_map_pieces(pieces, design_canvas, payload.get("garment_type", "unknown"))
+    if payload.get("apply", True):
+        apply_piece_mappings(project_id, pieces, mappings)
+        update_project_design_canvas(project_id, design_canvas)
+        pieces = raw_pieces(project_id)
+    return {
+        "design_canvas": design_canvas,
+        "mappings": mappings,
+        "pieces": [_piece_out_public(piece) for piece in pieces],
+        "warnings": _mapping_warnings(mappings),
+    }
+
+
+def _fit_global_job(job_id: str, payload: dict) -> dict:
+    project_id = _job_project(job_id)
+    texture = get_texture_row(payload["texture_id"], project_id)
+    pieces = raw_pieces(project_id)
+    design_canvas = build_design_canvas_config(pieces, payload)
+    mappings = auto_map_pieces(pieces, design_canvas, payload.get("garment_type", "unknown"))
+    design_path = project_dir(project_id) / "textures" / f"{texture['id']}_design_canvas.png"
+    build_design_texture_canvas(storage_path(texture["source_path"]), design_path, design_canvas)
+    if payload.get("apply", True):
+        apply_piece_mappings(project_id, pieces, mappings)
+        update_project_design_canvas(project_id, design_canvas)
+        with connect() as con:
+            con.execute(
+                "update textures set seamless_path = ?, width = ?, height = ?, version = version + 1 where id = ? and project_id = ?",
+                (rel_path(design_path), design_canvas["width"], design_canvas["height"], texture["id"], project_id),
+            )
+        texture = get_texture_row(texture["id"], project_id)
+        pieces = raw_pieces(project_id)
+    preview = project_dir(project_id) / "exports" / f"{job_id}_global_fit_preview.png"
+    build_fit_preview(pieces, design_path, preview, canvas_size_from_pieces(pieces))
+    return {
+        "texture": _texture_out(texture),
+        "design_canvas": design_canvas,
+        "design_canvas_path": rel_path(design_path),
+        "design_canvas_url": file_url(rel_path(design_path)),
+        "fit_preview_path": rel_path(preview),
+        "fit_preview_url": file_url(rel_path(preview)),
+        "mappings": mappings,
+        "pieces": [_piece_out_public(piece) for piece in pieces],
+        "warnings": _mapping_warnings(mappings),
+    }
+
+
 def _preview_job(job_id: str, payload: dict) -> dict:
     project_id = _job_project(job_id)
     texture = choose_texture(project_id, payload.get("texture_id", ""))
@@ -428,6 +501,17 @@ def _project_out(data: dict) -> dict:
     return data
 
 
+def update_project_design_canvas(project_id: str, design_canvas: dict) -> None:
+    project = get_project_dict(project_id)
+    export_config = dict(project.get("export_config") or {})
+    export_config["design_canvas"] = design_canvas
+    with connect() as con:
+        con.execute(
+            "update projects set export_config = ?, updated_at = ? where id = ?",
+            (dumps(export_config), now_iso(), project_id),
+        )
+
+
 def get_asset_row(asset_id: str, project_id: str) -> dict:
     with connect() as con:
         row = con.execute("select * from assets where id = ? and project_id = ?", (asset_id, project_id)).fetchone()
@@ -499,6 +583,37 @@ def raw_pieces(project_id: str) -> list[dict]:
     if not pieces:
         raise RuntimeError("No pieces imported")
     return pieces
+
+
+def apply_piece_mappings(project_id: str, pieces: list[dict], mappings: list[dict]) -> None:
+    by_id = {mapping["id"]: mapping for mapping in mappings}
+    with connect() as con:
+        for piece in pieces:
+            mapping = by_id.get(piece["id"])
+            if not mapping:
+                continue
+            transform = merge_mapping_into_transform(piece.get("transform", {}), mapping)
+            con.execute(
+                "update pieces set transform = ?, updated_at = ? where id = ? and project_id = ?",
+                (dumps(transform), now_iso(), piece["id"], project_id),
+            )
+
+
+def _piece_out_public(piece: dict) -> dict:
+    data = dict(piece)
+    data["mask_path"] = rel_path(data["mask_path"]) if isinstance(data.get("mask_path"), Path) else data.get("mask_path", "")
+    data["mask_url"] = file_url(data["mask_path"])
+    return data
+
+
+def _mapping_warnings(mappings: list[dict]) -> list[str]:
+    warnings = []
+    for mapping in mappings:
+        if mapping.get("piece_role") == "unknown":
+            warnings.append(f"{mapping['id']} 未能可靠识别裁片部位。")
+        elif float(mapping.get("fit_confidence", 0) or 0) < 0.65:
+            warnings.append(f"{mapping['id']} 自动映射置信度偏低。")
+    return warnings
 
 
 def choose_texture(project_id: str, texture_id: str) -> dict:
