@@ -44,8 +44,8 @@ def build_design_canvas_config(
     max_piece_w = max((int(piece.get("width", 0)) for piece in pieces), default=1200)
     max_piece_h = max((int(piece.get("height", 0)) for piece in pieces), default=1200)
     estimated_side = int(max(total_area, 1) ** 0.5)
-    width = int(payload.get("canvas_width") or max(2048, max_piece_w * 4, estimated_side * 3))
-    height = int(payload.get("canvas_height") or max(2048, max_piece_h * 4, estimated_side * 3))
+    width = int(payload.get("canvas_width") or max(1600, max_piece_w * 3, estimated_side * 2.2))
+    height = int(payload.get("canvas_height") or max(1200, max_piece_h * 3, estimated_side * 2.2))
     margin = max(80, min(width, height) // 24)
     return {
         "width": width,

@@ -578,57 +578,87 @@ export function StudioPage() {
 
             <Panel title="当前裁片参数">
               {selectedPiece ? (
-                <div className="grid gap-4 min-[980px]:grid-cols-2">
-                  <Range label="平移 X" value={selectedPiece.transform.offset_x} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_x: value })} />
-                  <Range label="平移 Y" value={selectedPiece.transform.offset_y} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_y: value })} />
-                  <Range label="缩放" value={selectedPiece.transform.scale} min={0.2} max={6} step={0.01} onChange={(value) => patchSelected({ scale: value })} />
-                  <Range label="旋转" value={selectedPiece.transform.rotation} min={-180} max={180} onChange={(value) => patchSelected({ rotation: value })} />
+                <div className="grid gap-4">
                   {selectedPiece.transform.mode === "global_canvas" && (
-                    <>
-                      <Range label="全局 X" value={selectedPiece.transform.design_x ?? 0} min={0} max={4096} onChange={(value) => patchSelected({ design_x: value })} />
-                      <Range label="全局 Y" value={selectedPiece.transform.design_y ?? 0} min={0} max={4096} onChange={(value) => patchSelected({ design_y: value })} />
-                      <Range label="取样宽" value={selectedPiece.transform.design_width ?? selectedPiece.width} min={24} max={4096} onChange={(value) => patchSelected({ design_width: value })} />
-                      <Range label="取样高" value={selectedPiece.transform.design_height ?? selectedPiece.height} min={24} max={4096} onChange={(value) => patchSelected({ design_height: value })} />
-                    </>
+                    <section className="grid gap-3 rounded-lg border border-line p-3">
+                      <div>
+                        <h3 className="m-0 text-sm font-semibold">全局取样</h3>
+                        <p className="m-0 mt-1 text-xs leading-5 text-slate-500">控制当前裁片从整张设计画布的哪个区域取图，优先用于保持跨裁片连续。</p>
+                      </div>
+                      <div className="grid gap-4 min-[980px]:grid-cols-2">
+                        <Range label="全局 X" description="取样区域在全局画布中的左右位置。" value={selectedPiece.transform.design_x ?? 0} min={0} max={8192} onChange={(value) => patchSelected({ design_x: value })} />
+                        <Range label="全局 Y" description="取样区域在全局画布中的上下位置。" value={selectedPiece.transform.design_y ?? 0} min={0} max={8192} onChange={(value) => patchSelected({ design_y: value })} />
+                        <Range label="取样宽" description="从全局画布取多宽，影响局部花纹密度。" value={selectedPiece.transform.design_width ?? selectedPiece.width} min={24} max={8192} onChange={(value) => patchSelected({ design_width: value })} />
+                        <Range label="取样高" description="从全局画布取多高，影响局部花纹密度。" value={selectedPiece.transform.design_height ?? selectedPiece.height} min={24} max={8192} onChange={(value) => patchSelected({ design_height: value })} />
+                      </div>
+                    </section>
                   )}
-                  <label className="grid gap-1 text-sm font-semibold">
-                    <span>裁片角色</span>
-                    <select className="rounded-lg border border-line bg-white px-3 py-2" value={selectedPiece.transform.piece_role || "unknown"} onChange={(event) => patchSelected({ piece_role: event.target.value, role_confirmed: true })}>
-                      {Object.entries(PIECE_ROLE_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="grid gap-1 text-sm font-semibold">
-                    <span>配对编号</span>
-                    <input className="rounded-lg border border-line px-3 py-2" value={selectedPiece.transform.pair_id || ""} onChange={(event) => patchSelected({ pair_id: event.target.value })} placeholder="例如 pair_front" />
-                  </label>
-                  <label className="grid gap-1 text-sm font-semibold">
-                    <span>配对方向</span>
-                    <select className="rounded-lg border border-line bg-white px-3 py-2" value={selectedPiece.transform.pair_side || ""} onChange={(event) => patchSelected({ pair_side: event.target.value as PieceTransform["pair_side"] })}>
-                      <option value="">未设置</option>
-                      <option value="left">左</option>
-                      <option value="right">右</option>
-                      <option value="none">无配对</option>
-                    </select>
-                  </label>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <label className="rounded-lg border border-line p-2">
-                      <input type="checkbox" checked={selectedPiece.transform.mirror_x} onChange={(event) => patchSelected({ mirror_x: event.target.checked })} /> 左右镜像
+                  <section className="grid gap-3 rounded-lg border border-line p-3">
+                    <div>
+                      <h3 className="m-0 text-sm font-semibold">单片微调</h3>
+                      <p className="m-0 mt-1 text-xs leading-5 text-slate-500">只影响当前裁片内部花位；全局模式下慎用，可能破坏跨裁片连续。</p>
+                    </div>
+                    <div className="grid gap-4 min-[980px]:grid-cols-2">
+                      <Range label="平移 X" description="当前裁片内左右移动图案。" value={selectedPiece.transform.offset_x} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_x: value })} />
+                      <Range label="平移 Y" description="当前裁片内上下移动图案。" value={selectedPiece.transform.offset_y} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_y: value })} />
+                      <Range label="缩放" description="当前裁片内单独放大或缩小图案。" value={selectedPiece.transform.scale} min={0.2} max={6} step={0.01} onChange={(value) => patchSelected({ scale: value })} />
+                      <Range label="旋转" description="当前裁片内单独旋转图案。" value={selectedPiece.transform.rotation} min={-180} max={180} onChange={(value) => patchSelected({ rotation: value })} />
+                    </div>
+                  </section>
+                  <section className="grid gap-3 rounded-lg border border-line p-3">
+                    <h3 className="m-0 text-sm font-semibold">基础设置</h3>
+                    <label className="grid gap-1 text-sm font-semibold">
+                      <span>裁片角色</span>
+                      <select className="rounded-lg border border-line bg-white px-3 py-2" value={selectedPiece.transform.piece_role || "unknown"} onChange={(event) => patchSelected({ piece_role: event.target.value, role_confirmed: true })}>
+                        {Object.entries(PIECE_ROLE_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <span className="text-xs font-normal leading-5 text-slate-500">告诉系统这块裁片是什么部位，影响主视觉和安全区判断。</span>
                     </label>
-                    <label className="rounded-lg border border-line p-2">
-                      <input type="checkbox" checked={selectedPiece.transform.mirror_y} onChange={(event) => patchSelected({ mirror_y: event.target.checked })} /> 上下镜像
-                    </label>
-                    <label className="rounded-lg border border-line p-2">
-                      <input type="checkbox" checked={Boolean(selectedPiece.transform.role_confirmed)} onChange={(event) => patchSelected({ role_confirmed: event.target.checked })} /> 人工确认
-                    </label>
-                    <label className="rounded-lg border border-line p-2">
-                      <input type="checkbox" checked={selectedPiece.transform.global_enabled ?? true} onChange={(event) => patchSelected({ global_enabled: event.target.checked })} /> 参与全局
-                    </label>
-                    <label className="rounded-lg border border-line p-2">
-                      <input type="checkbox" checked={selectedPiece.transform.locked} onChange={(event) => patchSelected({ locked: event.target.checked })} /> 锁定裁片
-                    </label>
-                  </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <label className="rounded-lg border border-line p-2">
+                        <input type="checkbox" checked={Boolean(selectedPiece.transform.role_confirmed)} onChange={(event) => patchSelected({ role_confirmed: event.target.checked })} /> 人工确认
+                        <span className="mt-1 block text-xs leading-5 text-slate-500">锁定当前部位判断。</span>
+                      </label>
+                      <label className="rounded-lg border border-line p-2">
+                        <input type="checkbox" checked={selectedPiece.transform.global_enabled ?? true} onChange={(event) => patchSelected({ global_enabled: event.target.checked })} /> 参与全局
+                        <span className="mt-1 block text-xs leading-5 text-slate-500">关闭后不按全局画布取样。</span>
+                      </label>
+                      <label className="rounded-lg border border-line p-2">
+                        <input type="checkbox" checked={selectedPiece.transform.locked} onChange={(event) => patchSelected({ locked: event.target.checked })} /> 锁定裁片
+                        <span className="mt-1 block text-xs leading-5 text-slate-500">避免误拖动或误改参数。</span>
+                      </label>
+                    </div>
+                  </section>
+                  <details className="rounded-lg border border-line p-3">
+                    <summary className="cursor-pointer text-sm font-semibold">高级参数</summary>
+                    <div className="mt-3 grid gap-4 min-[980px]:grid-cols-2">
+                      <label className="grid gap-1 text-sm font-semibold">
+                        <span>配对编号</span>
+                        <input className="rounded-lg border border-line px-3 py-2" value={selectedPiece.transform.pair_id || ""} onChange={(event) => patchSelected({ pair_id: event.target.value })} placeholder="例如 pair_front" />
+                        <span className="text-xs font-normal leading-5 text-slate-500">用于把左右片或成组裁片绑定，后续做同步和镜像联动。</span>
+                      </label>
+                      <label className="grid gap-1 text-sm font-semibold">
+                        <span>配对方向</span>
+                        <select className="rounded-lg border border-line bg-white px-3 py-2" value={selectedPiece.transform.pair_side || ""} onChange={(event) => patchSelected({ pair_side: event.target.value as PieceTransform["pair_side"] })}>
+                          <option value="">未设置</option>
+                          <option value="left">左</option>
+                          <option value="right">右</option>
+                          <option value="none">无配对</option>
+                        </select>
+                        <span className="text-xs font-normal leading-5 text-slate-500">标记当前裁片在配对中的左、右或不配对。</span>
+                      </label>
+                      <label className="rounded-lg border border-line p-2 text-sm">
+                        <input type="checkbox" checked={selectedPiece.transform.mirror_x} onChange={(event) => patchSelected({ mirror_x: event.target.checked })} /> 左右镜像
+                        <span className="mt-1 block text-xs leading-5 text-slate-500">把当前裁片取样结果左右翻转。</span>
+                      </label>
+                      <label className="rounded-lg border border-line p-2 text-sm">
+                        <input type="checkbox" checked={selectedPiece.transform.mirror_y} onChange={(event) => patchSelected({ mirror_y: event.target.checked })} /> 上下镜像
+                        <span className="mt-1 block text-xs leading-5 text-slate-500">把当前裁片取样结果上下翻转。</span>
+                      </label>
+                    </div>
+                  </details>
                   <button className="rounded-lg bg-white px-4 py-2 font-semibold text-ink ring-1 ring-line" onClick={() => patchSelected(emptyTransform)}>
                     重置当前裁片
                   </button>
@@ -650,6 +680,7 @@ export function StudioPage() {
           pieces={pieces}
           selectedPieceId={selectedPieceId}
           textureUrl={workspaceTextureUrl}
+          fallbackTextureUrl={selectedInputTextureUrl}
           designCanvas={designCanvas}
           selectedLayerId={selectedLayerId}
           showOutlines={showOutlines}
@@ -928,6 +959,7 @@ function FileField({
 
 function Range({
   label,
+  description,
   value,
   min,
   max,
@@ -935,6 +967,7 @@ function Range({
   onChange
 }: {
   label: string;
+  description?: string;
   value: number;
   min: number;
   max: number;
@@ -948,6 +981,7 @@ function Range({
         <strong>{Number(value).toFixed(step < 1 ? 2 : 0)}</strong>
       </span>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      {description && <span className="text-xs font-normal leading-5 text-slate-500">{description}</span>}
     </label>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import type { DesignCanvas, DesignLayer, DesignRect, Piece } from "@print-studio/shared-types";
+import type { DesignCanvas, DesignLayer, Piece } from "@print-studio/shared-types";
 import { PIECE_ROLE_LABELS } from "@/lib/labels";
 import "konva/lib/shapes/Image.js";
 import "konva/lib/shapes/Rect.js";
@@ -8,7 +8,7 @@ import "konva/lib/shapes/Text.js";
 import { useEffect, useMemo, useState } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva/es/ReactKonvaCore.js";
 
-function useLoadedImage(src: string) {
+function useLoadedImage(src: string, fallbackSrc = "") {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   useEffect(() => {
     if (!src) {
@@ -18,8 +18,19 @@ function useLoadedImage(src: string) {
     const img = new window.Image();
     img.crossOrigin = "anonymous";
     img.onload = () => setImage(img);
+    img.onerror = () => {
+      if (fallbackSrc && fallbackSrc !== src) {
+        const fallback = new window.Image();
+        fallback.crossOrigin = "anonymous";
+        fallback.onload = () => setImage(fallback);
+        fallback.onerror = () => setImage(null);
+        fallback.src = fallbackSrc;
+      } else {
+        setImage(null);
+      }
+    };
     img.src = src;
-  }, [src]);
+  }, [src, fallbackSrc]);
   return image;
 }
 
@@ -45,7 +56,9 @@ function useLuminanceMaskImage(image: HTMLImageElement | null) {
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
     const { data } = imageData;
     for (let index = 0; index < data.length; index += 4) {
-      const alpha = Math.max(data[index], data[index + 1], data[index + 2]);
+      const sourceAlpha = data[index + 3];
+      const luminanceAlpha = Math.max(data[index], data[index + 1], data[index + 2]);
+      const alpha = sourceAlpha < 255 ? sourceAlpha : luminanceAlpha;
       data[index] = 255;
       data[index + 1] = 255;
       data[index + 2] = 255;
@@ -82,19 +95,36 @@ function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1) {
       return;
     }
 
+    const source = context.getImageData(0, 0, mask.width, mask.height);
+    const output = outlineContext.createImageData(mask.width, mask.height);
     const radius = Math.max(1, Math.round(strokeWidth));
-    for (let y = -radius; y <= radius; y += 1) {
-      for (let x = -radius; x <= radius; x += 1) {
-        if (x * x + y * y > radius * radius) continue;
-        outlineContext.drawImage(mask, x, y);
+    const isOpaque = (x: number, y: number) => {
+      if (x < 0 || y < 0 || x >= mask.width || y >= mask.height) return false;
+      return source.data[(y * mask.width + x) * 4 + 3] > 10;
+    };
+    for (let y = 0; y < mask.height; y += 1) {
+      for (let x = 0; x < mask.width; x += 1) {
+        if (!isOpaque(x, y)) continue;
+        let edge = false;
+        for (let oy = -radius; oy <= radius && !edge; oy += 1) {
+          for (let ox = -radius; ox <= radius; ox += 1) {
+            if (ox * ox + oy * oy > radius * radius) continue;
+            if (!isOpaque(x + ox, y + oy)) {
+              edge = true;
+              break;
+            }
+          }
+        }
+        if (edge) {
+          const index = (y * mask.width + x) * 4;
+          output.data[index] = 224;
+          output.data[index + 1] = 82;
+          output.data[index + 2] = 82;
+          output.data[index + 3] = 255;
+        }
       }
     }
-    outlineContext.globalCompositeOperation = "source-in";
-    outlineContext.fillStyle = "#e05252";
-    outlineContext.fillRect(0, 0, canvas.width, canvas.height);
-    outlineContext.globalCompositeOperation = "destination-out";
-    outlineContext.drawImage(mask, 0, 0);
-    outlineContext.globalCompositeOperation = "source-over";
+    outlineContext.putImageData(output, 0, 0);
     setOutline(canvas);
   }, [mask, strokeWidth]);
 
@@ -231,6 +261,7 @@ type LayoutPreviewProps = {
   pieces: Piece[];
   selectedPieceId: string;
   textureUrl: string;
+  fallbackTextureUrl?: string;
   designCanvas?: DesignCanvas | null;
   selectedLayerId?: string;
   showOutlines: boolean;
@@ -245,6 +276,7 @@ export function LayoutPreview({
   pieces,
   selectedPieceId,
   textureUrl,
+  fallbackTextureUrl = "",
   designCanvas,
   selectedLayerId = "",
   showOutlines,
@@ -254,7 +286,7 @@ export function LayoutPreview({
   onMoveDesignRegion = () => {},
   onMoveLayer = () => {}
 }: LayoutPreviewProps) {
-  const textureImage = useLoadedImage(textureUrl);
+  const textureImage = useLoadedImage(textureUrl, fallbackTextureUrl);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
   const [previewMode, setPreviewMode] = useState<"layout" | "design">("layout");
   const bounds = useMemo(() => {
@@ -329,7 +361,7 @@ export function LayoutPreview({
                 onSelect={() => onSelectPiece(piece.id)}
               />
             ))}
-          {previewMode === "design" && (
+          {previewMode === "design" && showOutlines && (
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
               {pieces.map((piece) => (
                 <DesignRegionOutline
@@ -337,6 +369,7 @@ export function LayoutPreview({
                   piece={piece}
                   selected={piece.id === selectedPieceId}
                   outlineWidth={outlineWidth}
+                  zoom={layoutZoom}
                   onSelect={() => onSelectPiece(piece.id)}
                   onChange={(update) => onMoveDesignRegion(piece, update)}
                 />
@@ -366,12 +399,14 @@ function DesignRegionOutline({
   piece,
   selected,
   outlineWidth,
+  zoom,
   onSelect,
   onChange
 }: {
   piece: Piece;
   selected: boolean;
   outlineWidth: number;
+  zoom: number;
   onSelect: () => void;
   onChange: (update: Partial<Piece["transform"]>) => void;
 }) {
@@ -382,19 +417,14 @@ function DesignRegionOutline({
   const locked = Boolean(piece.transform.locked);
   return (
     <>
-      {(piece.transform.safe_zones || []).map((zone, index) => (
-        <ZoneRect key={`safe-${piece.id}-${index}`} zone={zone} piece={piece} fill="rgba(20,184,166,0.12)" stroke="rgba(20,184,166,0.55)" />
-      ))}
-      {(piece.transform.avoid_zones || []).map((zone, index) => (
-        <ZoneRect key={`avoid-${piece.id}-${index}`} zone={zone} piece={piece} fill="rgba(224,82,82,0.16)" stroke="rgba(224,82,82,0.55)" />
-      ))}
       <Rect
         x={x}
         y={y}
         width={width}
         height={height}
-        stroke={selected ? "#e05252" : "#2563eb"}
+        stroke={selected ? "#e05252" : "rgba(224,82,82,0.65)"}
         strokeWidth={outlineWidth}
+        strokeScaleEnabled={false}
         dash={selected ? [] : [12, 8]}
         draggable={selected && !locked}
         onClick={onSelect}
@@ -404,7 +434,17 @@ function DesignRegionOutline({
           onChange({ design_x: Math.round(event.target.x()), design_y: Math.round(event.target.y()) });
         }}
       />
-      <Text x={x + 8} y={y + 8} text={(piece.transform.piece_role ? PIECE_ROLE_LABELS[piece.transform.piece_role] || piece.transform.piece_role : "") || piece.name} fill={selected ? "#e05252" : "#0f172a"} fontSize={24} onClick={onSelect} onTap={onSelect} />
+      <Text
+        x={x}
+        y={y + height + 8}
+        width={width}
+        text={piece.name}
+        fill={selected ? "#e05252" : "rgba(224,82,82,0.9)"}
+        fontSize={Math.max(18, 14 / Math.max(zoom, 0.05))}
+        align="center"
+        onClick={onSelect}
+        onTap={onSelect}
+      />
       {selected && !locked && (
         <>
           <ResizeHandle x={x} y={y} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "top_left", onChange)} />
@@ -415,16 +455,6 @@ function DesignRegionOutline({
       )}
     </>
   );
-}
-
-function ZoneRect({ zone, piece, fill, stroke }: { zone: DesignRect; piece: Piece; fill: string; stroke: string }) {
-  const regionX = piece.transform.design_x ?? piece.source_x;
-  const regionY = piece.transform.design_y ?? piece.source_y;
-  const regionW = piece.transform.design_width ?? piece.width;
-  const regionH = piece.transform.design_height ?? piece.height;
-  const sx = regionW / Math.max(1, piece.width);
-  const sy = regionH / Math.max(1, piece.height);
-  return <Rect x={regionX + zone.x * sx} y={regionY + zone.y * sy} width={zone.width * sx} height={zone.height * sy} fill={fill} stroke={stroke} strokeWidth={1} listening={false} />;
 }
 
 function ResizeHandle({ x, y, cursor, onMove }: { x: number; y: number; cursor: string; onMove: (x: number, y: number) => void }) {
@@ -578,6 +608,8 @@ function ClippedTextureLayer({
         height: Math.max(1, piece.transform.design_height ?? piece.height)
       }
     : undefined;
+  const tiledSample = useTiledTextureSample(textureImage, crop || null);
+  const renderedImage = tiledSample || textureImage;
   const imageWidth = globalMode ? frame.width : Math.max(1, textureImage.naturalWidth * piece.transform.scale * frameScale);
   const imageHeight = globalMode ? frame.height : Math.max(1, textureImage.naturalHeight * piece.transform.scale * frameScale);
   const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : piece.transform.offset_x * frameScale);
@@ -586,8 +618,7 @@ function ClippedTextureLayer({
   return (
     <Layer scaleX={zoom} scaleY={zoom}>
       <KonvaImage
-        image={textureImage}
-        crop={crop}
+        image={renderedImage}
         x={imageCenterX}
         y={imageCenterY}
         width={imageWidth}
@@ -633,6 +664,33 @@ function ClippedTextureLayer({
 function wrapCropCoordinate(value: number, size: number) {
   if (!Number.isFinite(value) || size <= 0) return 0;
   return ((value % size) + size) % size;
+}
+
+function useTiledTextureSample(
+  textureImage: HTMLImageElement,
+  crop: { x: number; y: number; width: number; height: number } | null
+) {
+  return useMemo(() => {
+    if (!crop) return null;
+    const sourceWidth = textureImage.naturalWidth || textureImage.width;
+    const sourceHeight = textureImage.naturalHeight || textureImage.height;
+    if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+    const width = Math.max(1, Math.round(crop.width));
+    const height = Math.max(1, Math.round(crop.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    const offsetX = wrapCropCoordinate(crop.x, sourceWidth);
+    const offsetY = wrapCropCoordinate(crop.y, sourceHeight);
+    for (let y = -offsetY; y < height; y += sourceHeight) {
+      for (let x = -offsetX; x < width; x += sourceWidth) {
+        context.drawImage(textureImage, x, y, sourceWidth, sourceHeight);
+      }
+    }
+    return canvas;
+  }, [textureImage, crop?.x, crop?.y, crop?.width, crop?.height]);
 }
 
 function LayoutPieceTexture({
