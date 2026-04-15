@@ -33,6 +33,7 @@ export function StudioPage() {
   const [notice, setNotice] = useState("正在准备工作台...");
   const [templateFileName, setTemplateFileName] = useState("");
   const [textureFileName, setTextureFileName] = useState("");
+  const [textureViewMode, setTextureViewMode] = useState<"source" | "seamless">("source");
 
   useEffect(() => {
     api
@@ -55,6 +56,12 @@ export function StudioPage() {
     return { templateCount, patternCount, garmentPhotoCount, total: assets.length };
   }, [assets]);
   const activeTexture = textures[0] ?? null;
+  const hasSeamlessTexture = Boolean(activeTexture?.seamless_url);
+  const activeTextureUrl = activeTexture
+    ? textureViewMode === "seamless" && activeTexture.seamless_url
+      ? activeTexture.seamless_url
+      : activeTexture.source_url
+    : "";
 
   async function upload(kind: string, file: File) {
     if (!project) return;
@@ -95,6 +102,7 @@ export function StudioPage() {
       const done = await waitForJob(created.job_id, setJob);
       const texture = done.output.texture as Texture;
       setTextures((current) => [texture, ...current]);
+      setTextureViewMode("source");
       setNotice("纹理已生成，可继续做无缝化或直接导出。");
     } catch (error) {
       setNotice(readError(error));
@@ -109,6 +117,7 @@ export function StudioPage() {
       const done = await waitForJob(created.job_id, setJob);
       const texture = done.output.texture as Texture;
       setTextures((current) => [texture, ...current.filter((item) => item.id !== texture.id)]);
+      setTextureViewMode("seamless");
       setNotice("无缝大布料图已生成。");
     } catch (error) {
       setNotice(readError(error));
@@ -241,6 +250,7 @@ export function StudioPage() {
           pieces={pieces}
           selectedPieceId={selectedPieceId}
           texture={activeTexture}
+          textureUrl={activeTextureUrl}
           onSelectPiece={setSelectedPieceId}
           onMovePiece={(piece, x, y) => {
             setSelectedPieceId(piece.id);
@@ -276,7 +286,29 @@ export function StudioPage() {
           <Panel title="纹理与导出">
             {activeTexture ? (
               <div className="space-y-3">
-                <img className="checkerboard h-48 w-full rounded-lg object-cover" src={activeTexture.seamless_url || activeTexture.source_url} alt="当前纹理" />
+                <img className="checkerboard h-48 w-full rounded-lg object-contain" src={activeTextureUrl} alt="当前纹理" />
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className={`rounded-lg px-3 py-2 text-sm font-semibold ring-1 ring-line ${
+                      textureViewMode === "source" || !hasSeamlessTexture ? "bg-ink text-white" : "bg-white text-ink"
+                    }`}
+                    onClick={() => setTextureViewMode("source")}
+                  >
+                    使用原图
+                  </button>
+                  <button
+                    className={`rounded-lg px-3 py-2 text-sm font-semibold ring-1 ring-line ${
+                      textureViewMode === "seamless" && hasSeamlessTexture ? "bg-ink text-white" : "bg-white text-ink"
+                    } ${hasSeamlessTexture ? "" : "opacity-50"}`}
+                    disabled={!hasSeamlessTexture}
+                    onClick={() => setTextureViewMode("seamless")}
+                  >
+                    使用无缝图
+                  </button>
+                </div>
+                <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                  当前使用：{textureViewMode === "seamless" && hasSeamlessTexture ? "无缝图" : "原图"}。无缝处理适合满版纹理；透明底主体图案建议使用原图定位。
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={() => handleSeamless("mirror")}>
                     镜像无缝

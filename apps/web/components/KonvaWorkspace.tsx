@@ -61,12 +61,13 @@ type Props = {
   pieces: Piece[];
   selectedPieceId: string;
   texture: Texture | null;
+  textureUrl: string;
   onSelectPiece: (id: string) => void;
   onMovePiece: (piece: Piece, x: number, y: number) => void;
 };
 
-export function KonvaWorkspace({ pieces, selectedPieceId, texture, onSelectPiece, onMovePiece }: Props) {
-  const textureImage = useLoadedImage(texture?.seamless_url || texture?.source_url || "");
+export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, onSelectPiece, onMovePiece }: Props) {
+  const textureImage = useLoadedImage(textureUrl);
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
   const alphaMaskImage = useLuminanceMaskImage(maskImage);
@@ -110,58 +111,32 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, onSelectPiece
         </div>
         <div className="checkerboard overflow-hidden rounded-lg border border-line">
           <Stage width={520} height={640}>
-            <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
+            <Layer>
               <Rect x={0} y={0} width={520} height={640} fill="rgba(255,255,255,0.6)" />
               {!selected && <Text x={160} y={300} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
               {selected && !textureImage && <Text x={145} y={300} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
             </Layer>
             {textureImage && selected && alphaMaskImage && selectedMaskFrame && (
-              <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
-                <KonvaImage
-                  image={textureImage}
-                  x={260 + selected.transform.offset_x}
-                  y={320 + selected.transform.offset_y}
-                  width={Math.max(120, selected.width * selected.transform.scale)}
-                  height={Math.max(120, selected.height * selected.transform.scale)}
-                  offsetX={Math.max(60, (selected.width * selected.transform.scale) / 2)}
-                  offsetY={Math.max(60, (selected.height * selected.transform.scale) / 2)}
-                  rotation={selected.transform.rotation}
-                  scaleX={selected.transform.mirror_x ? -1 : 1}
-                  scaleY={selected.transform.mirror_y ? -1 : 1}
-                  draggable={!selected.transform.locked}
-                  onDragEnd={(event) => {
-                    onMovePiece(selected, event.target.x() - 260, event.target.y() - 320);
-                  }}
-                />
-                <KonvaImage
-                  image={alphaMaskImage}
-                  x={selectedMaskFrame.x}
-                  y={selectedMaskFrame.y}
-                  width={selectedMaskFrame.width}
-                  height={selectedMaskFrame.height}
-                  globalCompositeOperation="destination-in"
-                />
-              </Layer>
+              <ClippedTextureLayer
+                piece={selected}
+                textureImage={textureImage}
+                maskImage={alphaMaskImage}
+                frame={selectedMaskFrame}
+                zoom={pieceZoom}
+                draggable
+                onMove={(x, y) => onMovePiece(selected, x, y)}
+              />
             )}
             <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
-              {textureImage && selected && alphaMaskImage && (
-                <KonvaImage
-                  image={alphaMaskImage}
-                  x={selectedMaskFrame?.x ?? 40}
-                  y={selectedMaskFrame?.y ?? 60}
-                  width={selectedMaskFrame?.width ?? 440}
-                  height={selectedMaskFrame?.height ?? 520}
-                  opacity={0.2}
-                />
-              )}
-              {alphaMaskImage && selected && !textureImage && selectedMaskFrame && (
-                <KonvaImage
-                  image={alphaMaskImage}
+              {selectedMaskFrame && selected && (
+                <Rect
                   x={selectedMaskFrame.x}
                   y={selectedMaskFrame.y}
                   width={selectedMaskFrame.width}
                   height={selectedMaskFrame.height}
-                  opacity={0.42}
+                  stroke="#e05252"
+                  strokeWidth={2}
+                  dash={[10, 7]}
                 />
               )}
             </Layer>
@@ -188,9 +163,22 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, onSelectPiece
           <Stage width={Math.ceil(bounds.width * layoutZoom)} height={Math.ceil(bounds.height * layoutZoom)}>
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
               <Rect x={0} y={0} width={bounds.width} height={bounds.height} fill="rgba(255,255,255,0.55)" />
+            </Layer>
+            {textureImage &&
+              pieces.map((piece) => (
+                <LayoutPieceTexture
+                  key={`texture-${piece.id}`}
+                  piece={piece}
+                  textureImage={textureImage}
+                  selected={piece.id === selectedPieceId}
+                  zoom={layoutZoom}
+                  onSelect={() => onSelectPiece(piece.id)}
+                />
+              ))}
+            <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
               {pieces.map((piece) => (
-                <PieceMask
-                  key={piece.id}
+                <PieceOutline
+                  key={`outline-${piece.id}`}
                   piece={piece}
                   selected={piece.id === selectedPieceId}
                   onSelect={() => onSelectPiece(piece.id)}
@@ -216,23 +204,101 @@ function ZoomButton({ label, onClick }: { label: string; onClick: () => void }) 
   );
 }
 
-function PieceMask({ piece, selected, onSelect }: { piece: Piece; selected: boolean; onSelect: () => void }) {
+function ClippedTextureLayer({
+  piece,
+  textureImage,
+  maskImage,
+  frame,
+  zoom = 1,
+  draggable = false,
+  onMove,
+  onSelect
+}: {
+  piece: Piece;
+  textureImage: HTMLImageElement;
+  maskImage: CanvasImageSource;
+  frame: { x: number; y: number; width: number; height: number };
+  zoom?: number;
+  draggable?: boolean;
+  onMove?: (x: number, y: number) => void;
+  onSelect?: () => void;
+}) {
+  const frameScale = frame.width / Math.max(1, piece.width);
+  const imageWidth = Math.max(1, textureImage.naturalWidth * piece.transform.scale * frameScale);
+  const imageHeight = Math.max(1, textureImage.naturalHeight * piece.transform.scale * frameScale);
+  const imageCenterX = frame.x + frame.width / 2 + piece.transform.offset_x * frameScale;
+  const imageCenterY = frame.y + frame.height / 2 + piece.transform.offset_y * frameScale;
+
+  return (
+    <Layer scaleX={zoom} scaleY={zoom}>
+      <KonvaImage
+        image={textureImage}
+        x={imageCenterX}
+        y={imageCenterY}
+        width={imageWidth}
+        height={imageHeight}
+        offsetX={imageWidth / 2}
+        offsetY={imageHeight / 2}
+        rotation={piece.transform.rotation}
+        scaleX={piece.transform.mirror_x ? -1 : 1}
+        scaleY={piece.transform.mirror_y ? -1 : 1}
+        draggable={draggable && !piece.transform.locked}
+        onClick={onSelect}
+        onTap={onSelect}
+        onDragEnd={(event) => {
+          if (!onMove) return;
+          onMove(
+            Math.round((event.target.x() - (frame.x + frame.width / 2)) / frameScale),
+            Math.round((event.target.y() - (frame.y + frame.height / 2)) / frameScale)
+          );
+        }}
+      />
+      <KonvaImage
+        image={maskImage}
+        x={frame.x}
+        y={frame.y}
+        width={frame.width}
+        height={frame.height}
+        globalCompositeOperation="destination-in"
+        onClick={onSelect}
+        onTap={onSelect}
+      />
+    </Layer>
+  );
+}
+
+function LayoutPieceTexture({
+  piece,
+  textureImage,
+  selected,
+  zoom,
+  onSelect
+}: {
+  piece: Piece;
+  textureImage: HTMLImageElement;
+  selected: boolean;
+  zoom: number;
+  onSelect: () => void;
+}) {
   const mask = useLoadedImage(piece.mask_url);
   const alphaMask = useLuminanceMaskImage(mask);
+  if (!alphaMask) return null;
+
+  return (
+    <ClippedTextureLayer
+      piece={piece}
+      textureImage={textureImage}
+      maskImage={alphaMask}
+      frame={{ x: piece.source_x, y: piece.source_y, width: piece.width, height: piece.height }}
+      zoom={zoom}
+      onSelect={onSelect}
+    />
+  );
+}
+
+function PieceOutline({ piece, selected, onSelect }: { piece: Piece; selected: boolean; onSelect: () => void }) {
   return (
     <>
-      {alphaMask && (
-        <KonvaImage
-          image={alphaMask}
-          x={piece.source_x}
-          y={piece.source_y}
-          width={piece.width}
-          height={piece.height}
-          opacity={selected ? 0.7 : 0.34}
-          onClick={onSelect}
-          onTap={onSelect}
-        />
-      )}
       <Rect
         x={piece.source_x}
         y={piece.source_y}
