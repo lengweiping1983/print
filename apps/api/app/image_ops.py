@@ -1,4 +1,5 @@
 import math
+import base64
 from collections import deque
 from pathlib import Path
 from typing import Iterable
@@ -165,6 +166,22 @@ def render_piece(mask_path: Path, texture_path: Path, transform: dict, out_path:
     return out_path
 
 
+def render_piece_svg(mask_path: Path, out_path: Path) -> Path:
+    with Image.open(mask_path).convert("L") as mask:
+        png_path = out_path.with_suffix(".mask.png")
+        mask.save(png_path)
+        encoded = base64.b64encode(png_path.read_bytes()).decode("ascii")
+        png_path.unlink(missing_ok=True)
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{mask.width}" height="{mask.height}" viewBox="0 0 {mask.width} {mask.height}">
+  <title>{out_path.stem} cutting mask</title>
+  <image width="{mask.width}" height="{mask.height}" href="data:image/png;base64,{encoded}" />
+</svg>
+"""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(svg, encoding="utf-8")
+    return out_path
+
+
 def render_layout(
     pieces: Iterable[dict],
     texture_path: Path,
@@ -193,4 +210,3 @@ def render_layout(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out.save(out_path)
     return out_path
-

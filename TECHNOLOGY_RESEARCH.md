@@ -554,103 +554,337 @@ AI Provider 的 API Key 通过环境变量读取，不写入代码或数据库�
 
 ---
 
-## 10. 相关技术文献与延伸阅读索引
-
-以下按技术方向整理了 50+ 核心参考资料与研究方向，可作为团队深入学习和系统扩展的知识库。
-
-### 10.1 计算机视觉与图像分割（1-8）
-
-1. **Connected Component Labeling** - Rosenfeld & Pfaltz (1966)，连通域分析奠基论文。
-2. **Flood Fill Algorithm** - 经典图形学算法，参考 《Computer Graphics: Principles and Practice》。
-3. **Marching Squares** - 轮廓提取算法，可将二值掩码转换为矢量 polygon。
-4. **Alpha Matting** - 前景提取技术，如 Closed-Form Matting、KNN Matting，用于更精确的裁片边缘。
-5. **Morphological Operations** - 膨胀、腐蚀、开闭运算，用于预处理噪点。
-6. **Distance Transform** - 距离变换，可用于计算裁片骨架和中心线。
-7. **GrabCut** - 交互式前景分割，未来可支持用户手动修正裁片边界。
-8. **U-Net / SAM (Segment Anything)** - 基于深度学习的分割模型，可替代传统 Flood Fill 处理复杂裁片。
-
-### 10.2 无缝纹理与图形合成（9-16）
-
-9. **Wang Tiles** - Cohen et al. (2003)，基于瓦片的无缝纹理合成。
-10. **Image Quilting** - Efros & Freeman (2001)，基于块拼接的纹理合成。
-11. **Poisson Image Editing** - Pérez et al. (2003)，梯度域图像融合。
-12. **Multi-resolution Sampling** - 多分辨率纹理合成，适用于超高清布料。
-13. **Torus Topology in Texture Synthesis** - 环面纹理合成，保证周期边界。
-14. **Perlin Noise** - 程序化噪声生成，适合基础织物纹理。
-15. **Substance Designer** - 行业标准程序化纹理工具，其基于节点的合成思路可借鉴。
-16. **GAN-based Texture Synthesis** - 使用生成对抗网络学习周期性纹理。
-
-### 10.3 图像变换与渲染（17-24）
-
-17. **Affine Transformations in Digital Image Processing** - Gonzalez & Woods。
-18. **Lanczos Resampling** - 高质量图像重采样理论。
-19. **Mitchell-Netravali Filters** - 另一种高质量的图像滤波器族。
-20. **Alpha Compositing (Porter-Duff)** - 数字图像合成标准。
-21. **Gamma Correction in Image Processing** - 色彩空间与 Gamma 校正。
-22. **ICC Color Profiles** - 跨设备颜色一致性管理。
-23. **CMYK vs RGB in Textile Printing** - 纺织印刷中的色彩模式转换。
-24. **Anti-aliasing in Canvas Rendering** - 画布渲染中的抗锯齿技术。
-
-### 10.4 AI 图像生成（25-32）
-
-25. **DALL-E 3 Technical Report** - OpenAI 的文生图模型架构。
-26. **Stable Diffusion** - Latent Diffusion Models (Rombach et al., 2022)。
-27. **ControlNet** - 通过条件控制扩散模型生成结果。
-28. **LoRA (Low-Rank Adaptation)** - 轻量级模型微调技术，可训练专属花型风格。
-29. **Textual Inversion** - 通过文本嵌入学习新概念。
-30. **Inpainting with Diffusion Models** - 局部重绘技术，可用于修缝。
-31. **Tiled Diffusion** - 高分辨率图像生成技术。
-32. **Prompt Engineering for Textile Design** - 针对纺织品设计的提示工程。
-
-### 10.5 Web 后端与架构（33-40）
-
-33. **FastAPI Documentation** - 官方文档，涵盖依赖注入、后台任务、WebSocket。
-34. **Pydantic V2 Performance** - Rust 核心的数据校验性能优化。
-35. **ASGI (Asynchronous Server Gateway Interface)** - FastAPI 底层的异步网关接口标准。
-36. **ThreadPoolExecutor vs ProcessPoolExecutor** - Python 并发执行器的选择。
-37. **CQRS Pattern** - 命令查询职责分离，可扩展 Job 队列设计。
-38. **Event Sourcing** - 事件溯源，适合记录裁片变换历史。
-39. **RESTful API Design Best Practices** - REST API 设计规范（RFC 7231）。
-40. **Zero-copy File Serving** - 高效的静态文件传输技术（sendfile）。
-
-### 10.6 前端与 Canvas 图形学（41-48）
-
-41. **React 19 Official Blog** - React 19 新特性（Actions, useOptimistic, Server Components）。
-42. **Next.js App Router Architecture** - Vercel 官方对 App Router 的架构解释。
-43. **Konva.js Documentation** - 2D Canvas 抽象层的设计与性能优化。
-44. **HTML5 Canvas Performance** - 离屏 Canvas、Layer 缓存、脏矩形优化。
-45. **React-Konva Best Practices** - 在 React 中高效使用 Konva 的模式。
-46. **Tailwind CSS Design System** - 原子化 CSS 与 Design Token 管理。
-47. **Responsive Grid Layouts** - CSS Grid 与 Flexbox 在复杂仪表盘中的应用。
-48. **Accessibility (a11y) in Canvas Applications** - Canvas 应用的无障碍设计挑战。
-
-### 10.7 数据库与存储（49-52）
-
-49. **SQLite Full Documentation** - 官方文档，涵盖 WAL 模式、FTS5、JSON1 扩展。
-50. **JSON1 Extension in SQLite** - 原生 JSON 支持，可替代手动的 json.dumps/loads。
-51. **Database Normalization** - 数据库规范化理论（1NF-5NF）。
-52. **Object-Relational Mapping Trade-offs** - ORM  vs 原始 SQL 的权衡（本项目采用原始 SQL）。
-
 ---
 
-## 总结
+# 服装裁片贴图系统核心技术调研文档 — 延伸阅读索引（DuckDuckGo 搜索结果）
 
-`print` 项目虽然代码量精简，但覆盖了从**计算机视觉（连通域分析）**、**图像处理（无缝纹理、Alpha 合成）**、**AI 生成（多 Provider 策略）**到**现代 Web 全栈（FastAPI + Next.js + Konva）**的完整技术链路。
+> 本附录基于 DuckDuckGo（ddgs）免费搜索整理，共收录约 55 篇技术文章、论文与官方文档，
 
-其设计哲学体现了几个关键工程原则：
+> 覆盖图像分割、纹理合成、AI 生成、Web 架构、前端交互、数据存储与服装产业数字化。
 
-1. **渐进式复杂度**：先用 Flood Fill + BFS 解决 80% 的裁片拆分问题，预留 SAM/深度学习接口。
-2. **零依赖优先**：SQLite + ThreadPoolExecutor 替代 Redis/Celery，降低部署门槛。
-3. **防御性设计**：API Key 缺失时自动 fallback 到本地占位图，保证服务不中断。
-4. **前后端类型对齐**：Pydantic + TypeScript Shared Types 减少接口约定错误。
-5. **用户体验优先**：双画布实时交互 + 异步任务轮询，平衡了响应速度与计算成本。
 
-未来可重点扩展的方向：
-- **智能分割**：引入 SAM (Segment Anything Model) 处理更复杂的裁片边界。
-- **AI 无缝化**：用 Inpainting Diffusion 替代 Mirror/Offset 的后处理无缝。
-- **色彩管理**：接入 ICC Profile 和 CMYK 转换，对接真实印花设备。
-- **协作与版本**：引入 Git-like 的版本控制，支持多人协同调整花位。
+## 10.1 计算机视觉与图像分割（15 篇）
 
----
+1. **[Connected-component labeling - Wikipedia](https://en.wikipedia.org/wiki/Connected-component_labeling)**  
+   January 20, 2026 - In short, once the first pixel of a connected component is found, all the connected pixels of that co
 
-*文档结束*
+2. **[C. A. Bouman: Digital Image Processing - January 11, 2026 1](https://engineering.purdue.edu/~bouman/ece637/notes/pdf/ConnectComp.pdf)**  
+   C. A. Bouman: Digital Image Processing ... Any set of pixels which is not separated by a boundary is · call connected. •
+
+3. **[Image Analysis - Connected Components Labeling](https://homepages.inf.ed.ac.uk/rbf/HIPR2/label.htm)**  
+   Try using thresholding and connected components analysis to segment the image
+
+4. **[Scikit-Image : Image Processing with Python · python-data](https://exeter-data-analytics.github.io/python-data/skimage.html)**  
+   See if you can find a filter or combination of filters that enhance your final segmentations. Use either a limit on mini
+
+5. **[OpenCV Connected Component Labeling and Analysis - PyImageSearch](https://pyimagesearch.com/2021/02/22/opencv-connected-component-labeling-and-analysis/)**  
+   April 17, 2021 - In this tutorial, you will learn how to perform connected component labeling and analysis with OpenCV.
+
+6. **[Flood fill Algorithm - how to implement fill() in paint? - GeeksforGeeks](https://www.geeksforgeeks.org/dsa/flood-fill-algorithm-implement-fill-paint/)**  
+   Flood Fill is a classic algorithm used to change the color of an area in a 2D image where all pixels are connected and h
+
+7. **[Implementing a Reliable Non-Recursive Flood Fill Algorithm in...](https://www.codestudy.net/blog/a-working-non-recursive-floodfill-algorithm-written-in-c/)**  
+   Introduction to Flood Fill#. Flood fill is a region-filling algorithm that starts at a seed pixel (x, y) and replaces al
+
+8. **[Flood Fill Algorithm using Breadth First Search | Algorithms...](https://helloacm.com/flood-fill-algorithm-using-breadth-first-search/)**  
+   Tags:breadth first search algorithm, c++, Flood Fill Algorithm, Image Flood Fill.You are given a two dimensional array m
+
+9. **[This is how Paint's bucket fill works (Flood fill algorithm) - YouTube](https://www.youtube.com/watch?v=VuiXOc81UDM)**  
+   Source code: https://gist.github.com/syphh/8cbad50acb2e0f4ca60ef041814c271b Learn graph theory algorithms: https://insco
+
+10. **[Floodfill Algorithm Explained: All You Need to... | Level Up Coding](https://levelup.gitconnected.com/floodfill-algorithm-explained-all-you-need-to-know-with-code-samples-265d5db87777)**  
+   How Does Floodfill Algorithm Work? Floodfill algorithm is a technique used to fill a connected area in an image or a mat
+
+11. **[Segment Anything Model (SAM) - Ultralytics YOLO Docs](https://docs.ultralytics.com/models/sam/)**  
+   Key Features of the Segment Anything Model (SAM). Available Models, Supported Tasks, and Operating Modes. How to Use SAM
+
+12. **[An Introduction to the Foundational Model of Image Segmentation...](https://xiaosean5408.medium.com/an-introduction-to-the-foundational-model-of-image-segmentation-segment-anything-sam-e9841b8372aa)**  
+   The SAM model can obtain corresponding image segmentation results by combining different Prompts. For example, after usi
+
+13. **[307 - Segment your images in python without training using... - YouTube](https://www.youtube.com/watch?v=fVeW9a6wItM)**  
+   Segment your images in python without training using Segment Anything Model (SAM) by Meta AICode from this video is avai
+
+14. **[How to Use the Segment Anything Model (SAM) | Roboflow Blog](https://blog.roboflow.com/how-to-use-segment-anything-model-sam/)**  
+   Segment Anything (SAM) is an image segmentation model developed by Meta AI. This model can identify the precise location
+
+15. **[Segment Anything Model: A New Era in Computer Vision](https://www.linkedin.com/pulse/segment-anything-model-new-era-computer-vision-margaret-ann-davis-blmve)**  
+   The Segment Anything Model (SAM) marks a significant advancement in computer vision, designed to improve how machines in
+
+
+## 10.2 无缝纹理与图形合成（20 篇）
+
+16. **[Free Seamless Texture Generator: Create Photoshop Patterns (1-Click)](https://the-orange-box.com/product/free-seamless-texture-generator/)**  
+   February 10, 2026 - Stop struggling with Offset filters. Download the free Seamless Texture Generator for Photoshop. Cre
+
+17. **[Make seamless texture online - IMG online](https://www.imgonline.com.ua/eng/make-seamless-texture.php)**  
+   Make a seamless texture from photo online. Optionally you can choose the way to create a seamless texture, level of brig
+
+18. **[Seamless Fabric Textures - Architextures](https://architextures.org/textures/category/fabric)**  
+   Architextures (ARTX), is a library of high quality seamless textures for use in architectural drawings and 3D models. Al
+
+19. **[r/StableDiffusion on Reddit: What is the best way I can make seamless textures in Flux like you can in SD?](https://www.reddit.com/r/StableDiffusion/comments/1ftzldy/what_is_the_best_way_i_can_make_seamless_textures/)**  
+   October 1, 2024 - ... Yeah it gets close and it should be an easy fix: Generate, offset by half the size in an image edi
+
+20. **[Seamless Texture Generator Online | Convert Images to Tileable Textures | Texmateria](https://texmateria.com/seamlessit/)**  
+   No uploads, no waiting, no limits! Uses histogram-preserving blending with Gaussian weights to make seamless transitions
+
+21. **[US7605821B1 - Poisson image-editing technique that matches](https://patents.google.com/patent/US7605821B1/en)**  
+   ... the present invention relates to an improved Poisson image-editing technique, which matches both pixel values and te
+
+22. **[US8351713B2 - Drag-and-drop pasting for seamless image](https://patents.google.com/patent/US8351713B2/en)**  
+   Then, by solving Poisson equations using the user-specified boundary condition, Poisson image editing seamlessly blends
+
+23. **[US9317773B2 - Patch-based synthesis techniques using color and](https://patents.google.com/patent/US9317773B2/en)**  
+   Patch-based synthesis methods including patch matching and patch blending techniques are described that may be applied i
+
+24. **[US20070013813A1 - Poisson matting for images - Google Patents](https://patents.google.com/patent/US20070013813A1/en)**  
+   An exemplary method uses Poisson matting to estimate a gradient matte from an image and then reconstruct the matte by so
+
+25. **[US8861868B2 - Patch-based synthesis techniques - Google Patents](https://patents.google.com/patent/US8861868B2/en)**  
+   Applications include texture synthesis, image and video completion, retargeting, image reshuffling, image stitching, new
+
+26. **[PDF Image Quilting for Texture Synthesis and Transfer](https://people.eecs.berkeley.edu/~efros/research/quilting/quilting.pdf)**  
+   We present a simple image-based method of generating novel vi-sual appearance in which a new image is synthesized by sti
+
+27. **[Image quilting for texture synthesis and transfer](https://dl.acm.org/doi/10.1145/383259.383296)**  
+   We present a simple image-based method of generating novel visual appearance in which a new image is synthesized by stit
+
+28. **[Image Quilting for Texture Synthesis and Transfer - GitHub Pages](http://jmecom.github.io/projects/computational-photography/texture-synthesis/)**  
+   Texture Synthesis Past texture synthesis algorithms create the new texture pixel by pixel, but Efros and Freeman noticed
+
+29. **[PDF Image Quilting for Texture Synthesis and Transfer](http://www.ai.mit.edu/research/abstracts/abstracts2001/vision/05efros.pdf)**  
+   Approach-Image Quilting: Here, we outline our patch-based texture synthesis procedure, image quilting. To synthesize a n
+
+30. **[PDF Quilting for Texture Synthesis and Transfer](https://merl.com/publications/docs/TR2001-17.pdf)**  
+   Abstract We present a simple image-based method of generating novel visual appearance in which a new image is synthesize
+
+31. **[Using Wang Tiles to Simulate Turing Machines « The blog](https://blog.demofox.org/2016/03/14/computation-with-wang-tile/)**  
+   Wang tiles were invented by Hao Wang in 1961 for mathematical reasons, but they find great use in games for making tile
+
+32. **[Procedural World: Introduction to Wang Tiles](http://procworld.blogspot.com/2013/01/introduction-to-wang-tiles.html)**  
+   You could say we have used them already without knowing, as the traditional way we tile textures is one specific case of
+
+33. **[Getting More out of Seamless Tiles – Dev.Mag](http://devmag.org.za/2009/05/28/getting-more-out-of-seamless-tiles/)**  
+   A strategy for creating seamless tiles is to start of with seamless tiles, and then transform them using transformations
+
+34. **[More than just texture metamers — plenoptic 1.3.2.dev213](https://docs.plenoptic.org/docs/branch/main/tutorials/models/portilla_simoncelli/ps_extensions.html)**  
+   ... benefit is that the synthetic images are seamlessly periodic (due to circular boundary-handling within our algorithm
+
+35. **[Jiaping Wang's Homepage](http://www.jiapingwang.com/)**  
+   Vector Regression Functions for Texture Compression Ying Song , Jiaping Wang , Liyi Wei , Wencheng Wang Raster images ar
+
+
+## 10.3 图像变换与渲染（15 篇）
+
+36. **[Image Processing With the Python Pillow Library – Real Python](https://realpython.com/image-processing-with-the-python-pillow-library/)**  
+   Watch it together with the written tutorial to deepen your understanding: Process Images Using the Pillow Library and Py
+
+37. **[Python Pillow Tutorial](https://www.tutorialspoint.com/python_pillow/index.htm)**  
+   ... image processing capabilities of python using ... Our tutorial offers an excellent starting point for learning Image
+
+38. **[Python Pillow - Batch Processing Images](https://www.tutorialspoint.com/python_pillow/python_pillow_batch_processing_images.htm)**  
+   Here is an example that demonstrates the resizing multiple images at once using the Python Pillow batch processing.
+
+39. **[Tutorial: Working with Images in Python using Pillow](http://www.maxpython.com/pillow/tutorial-working-with-images-in-python-using-pillow.php)**  
+   Pillow is a powerful library in Python for image processing, built as a fork of the Python Imaging Library (PIL). ... Pi
+
+40. **[Tutorial: Working with Images in Python using Pillow](https://www.maxpython.com/pillow/tutorial-working-with-images-in-python-using-pillow.php)**  
+   Pillow is a powerful library in Python for image processing, built as a fork of the Python Imaging Library (PIL). ... Pi
+
+41. **[Alpha compositing - Wikipedia](https://en.wikipedia.org/wiki/Alpha_compositing)**  
+   Compositing is used extensively in film when combining computer-rendered image elements with live footage. Alpha blendin
+
+42. **[Porter/Duff Compositing and Blend Modes – Søren Sandmann...](https://ssp.impulsetrain.com/porterduff.html)**  
+   In Porter/Duff, stacking images on top of each other is done with the “Over” operator, which is also what Photoshop/Gimp
+
+43. **[Alpha Compositing – Bartosz Ciechanowski](https://ciechanow.ski/alpha-compositing/)**  
+   Compositing elements of a “Cancel” Button. Compositing is often performed in multiple steps where each step combines two
+
+44. **[AlphaComposite](https://resources.mpi-inf.mpg.de/d5/teaching/ss05/is05/javadoc/java/awt/AlphaComposite.html)**  
+   The rules implemented by this class are the set of Porter-Duff rules described in T. Porter and T. Duff, "Compositing Di
+
+45. **[PorterDuff.Mode | API reference | Android Developers](https://developer.android.com/reference/android/graphics/PorterDuff.Mode)**  
+   android.graphics.PorterDuff.Mode. The name of the parent class is an homage to the work of Thomas Porter and Tom Duff, p
+
+46. **[Image scaling - Wikipedia](https://en.wikipedia.org/wiki/Image_scaling)**  
+   Edge-directed interpolation algorithms aim to preserve edges in the image after scaling, unlike other algorithms, which
+
+47. **[image - Lanczos interpolation in C - Stack Overflow](https://stackoverflow.com/questions/34198553/lanczos-interpolation-in-c)**  
+   ... to implement the following formula in c-code: https://en.wikipedia.org/wiki/Lanczos_resampling Therefore i'm using t
+
+48. **[python - Resizing a 3D image (and resampling) - Stack Overflow](https://stackoverflow.com/questions/18386302/resizing-a-3d-image-and-resampling)**  
+   ... be the size of another image(call it whole_brain_bravo); 256 x 256 x 176, and (hopefully) use a lanczos interpolatio
+
+49. **[python - Numpy Resize/Rescale Image - Stack Overflow](https://stackoverflow.com/questions/48121916/numpy-resize-rescale-image)**  
+   An important aspect is the interpolation parameter: there are several ways how to resize an image. ... over the interpol
+
+50. **[Android: Bitmap resizing using better resampling algorithm than](https://stackoverflow.com/questions/37763257/android-bitmap-resizing-using-better-resampling-algorithm-than-bilinear-like-l)**  
+   Android: Bitmap resizing using better resampling algorithm than bilinear (like Lanczos3) ... scaling is really a great i
+
+
+## 10.4 AI 图像生成与纺织品设计（10 篇）
+
+51. **[fabric pattern design with AI Archives - MYTH AI](https://myth-ai.com/category/fabric-pattern-design-with-ai/)**  
+   Myth AI is combating fashion industry waste with AI-generated textile patterns; streamlining design processes, enhancing
+
+52. **[AI Pattern Generator Archives - MYTH AI](https://myth-ai.com/category/ai-pattern-generator/)**  
+   ai fashion design , AI flower pattern , AI textile design , blockprint generator , floral rapport , flower hometextile ,
+
+53. **[Revolutionizing Textile Design: The Power of AI Fabric Pattern](https://jpcia.com/2025/09/25/revolutionizing-textile-design-the-power-of-ai-fabric-pattern-changer/)**  
+   ... your design process? Explore the potential of an ai fabric pattern changer to unlock new levels of creativity and ef
+
+54. **[Revolutionizing Textile Design: The Power of AI Fabric Pattern](https://jpcia.com/2025/09/25/revolutionizing-textile-design-the-power-of-ai-fabric-pattern-changers/)**  
+   ... ai fabric pattern changer , which is reshaping how designers ... Previous: Revolutionizing Textile Design: The Power
+
+55. **[Know Some Things About Textile Pattern Designs - Premium](https://sevenarticle.com/know-some-things-about-textile-pattern-designs/)**  
+   Pattern designing is one of the basic steps that has been taken by Textile Pattern Designers in New York City to make a
+
+56. **[GitHub - lllyasviel/ControlNet: Let us control diffusion models! · GitHub](https://github.com/lllyasviel/ControlNet)**  
+   Contribute to lllyasviel/ControlNet development by creating an account on GitHub.lllyasviel / ControlNet Public. Notific
+
+57. **[ControlNet - Control Diffusion Models | Stable Diffusion Online](https://stablediffusionweb.com/ControlNet)**  
+   ControlNet is a neural network structure to control diffusion models by adding extra conditions, a game changer for AI I
+
+58. **[ControlNet - Adding control to Stable Diffusion's image generation](https://blog.segmind.com/what-is-stable-diffusion-controlnet/)**  
+   ControlNet is an iteration of the Stable Diffusion model. For those familiar with the intricacies of neural network desi
+
+59. **[ControlNet: A Complete Guide - Stable Diffusion Art](https://stable-diffusion-art.com/controlnet/)**  
+   Installing Stable Diffusion ControlNet. Install ControlNet in Google Colab. Install ControlNet on Windows PC or Mac.Cont
+
+60. **[Navigating ControlNet with ComfyUI for Enhanced Diffusion Models](https://www.ionio.ai/blog/navigating-controlnet-with-comfyui-for-enhanced-diffusion-models)**  
+   ControlNet introduces an unprecedented level of specificity and control over the Stable Diffusion process, allowing user
+
+
+## 10.5 Web 后端与架构（5 篇）
+
+61. **[GitHub - cold-summer/full-stack-fastapi-nextjs-llm-template:...](https://github.com/cold-summer/full-stack-fastapi-nextjs-llm-template)**  
+   Full-Stack FastAPI + Next.js Template for AI/LLM Applications. Frontend (Next.js 15). React 19 + TypeScript + Tailwind C
+
+62. **[Boosting Your Full-Stack Workflow with Next.js, FastAPI... | Medium](https://medium.com/@kaweyo_41978/boosting-your-full-stack-workflow-with-next-js-and-fastapi-and-vercel-3c7d3cd8220f)**  
+   Next.js and FastAPI are like two strong fast horses that may run togeher. Photo by James Wainscoat on Unsplash. This art
+
+63. **[Managing type safety challenges using the FastAPI + Next.js template](https://www.vintasoftware.com/blog/type-safety-fastapi-nextjs-architecture)**  
+   Learn how to solve full-stack type safety challenges with FastAPI + Next.js. Eliminate integration bugs, automate client
+
+64. **[Building a Modern Full-Stack Todo Application: FastAPI, Next.js...](https://www.linkedin.com/pulse/building-modern-full-stack-todo-application-fastapi-jangam--chebc)**  
+   A Modern Full-Stack Todo Application: Built with FastAPI, Next.js, and SQLite. This project brings together a clean, int
+
+65. **[Architecture Patterns | Skills Marke... · LobeHub](https://lobehub.com/skills/vanman2024-dev-lifecycle-marketplace-architecture-patterns)**  
+   Architecture types: nextjs, fastapi, fullstack, microservices, rag, generic. Generates complete architecture overview wi
+
+
+## 10.6 前端与 Canvas 图形学（15 篇）
+
+66. **[HTML5 Canvas Drag and Drop an Image | Konva - JavaScript...](https://konvajs.org/docs/drag_and_drop/Drag_an_Image.html)**  
+   Konva.js - HTML5 Canvas JavaScript Framework. Konva Tutorials Demos API Reference.The draggable() method enables drag an
+
+67. **[How to drag and drop DOM image into the canvas | Konva...](https://konvajs.org/docs/sandbox/Drop_DOM_Element.html)**  
+   Konva.js - HTML5 Canvas JavaScript Framework. Konva Tutorials Demos API Reference.The first image you see is a DOM image
+
+68. **[Guide to canvas manipulation with React Konva - LogRocket Blog](https://blog.logrocket.com/canvas-manipulation-react-konva/)**  
+   React Konva comes with shapes such as rectangles, circles, ellipses, lines, images, text, stars, labels, SVG, and polygo
+
+69. **[Canvas Drag & Drop Objects Tutorial | HTML5 Canvas JavaScript...](https://www.youtube.com/watch?v=7PYvx8u_9Sk)**  
+   Canvas Drag & Drop Tutorial for cavas objects, like rects, rectangles and circles. Learn how to implement JavaScript and
+
+70. **[A deep dive into KonvaJS](https://readmedium.com/a-deep-dive-into-konvajs-c5b88a161679)**  
+   Konva makes implementing drag-and-drop functionality straightforward. It offers built-in methods to make shapes draggabl
+
+71. **[What's New in React 19? | Travis Ramos](https://travislramos.com/blog/whats-new-in-react-19)**  
+   React 19 is here, and it s packed with features that push performance and efficiency to new heights. ... Server Componen
+
+72. **[Advanced Next.js: Server Actions, Routing & Data Fetching |](https://frontendmasters.com/courses/intermediate-next-js/)**  
+   Scott reviews some recent features added to React that are often thought to be developed by the Next.js team. ... compon
+
+73. **[Next.js: Latest Features Unveiled](https://blog.tuanhadev.tech/all-the-new-features-in-nextjs)**  
+   Next.js 16 ships with React 19.2 and full support for the React Compiler (automatic memoization). ... Next.js 15 Release
+
+74. **[New & Improved React V19 Step-by-Step Guide with Practical](https://laramatic.com/react-v19-code-examples/)**  
+   This new release of React is also introduces Server Components and Server Actions, which allow developers to build more
+
+75. **[Experimenting with React Server Components and Vite](https://danielnagy.me/posts/Post_usaivhdu3j5d)**  
+   The new server features in React 19 are server components and server actions. ... server components, but server componen
+
+76. **[How to Create Responsive Grid Layout In Tailwind Css?](https://studentprojectcode.com/blog/how-to-create-responsive-grid-layout-in-tailwind)**  
+   By following these steps, you can create a full-width grid layout in Tailwind CSS using the responsive grid system provi
+
+77. **[Implementing Responsive Grids with Tailwind CSS: An In-Depth](https://www.frontendreference.com/tailwindcss-grid-example.html)**  
+   ... design, grid layouts are a staple for creating ... Tailwind CSS offers powerful utilities to build grid systems that
+
+78. **[How to Use Tailwind CSS Grid | Refine](https://refine.dev/blog/tailwind-grid/)**  
+   Quick Summary: Tailwind CSS Grid is a utility-first system and is utilizing CSS Grid to create responsive, flexible layo
+
+79. **[Tailwind CSS Grid | Pagedone](https://pagedone.io/docs/grids)**  
+   Tailwind css provides responsive flexbox grids using a twelve column system which lets you design various custom layouts
+
+80. **[Tailwind CSS Grids - How to use grid with Tailwind](https://tailscan.com/blog/tailwind-css-grid-a-quick-overview)**  
+   Both grid and flex in Tailwind CSS are powerful layout systems that can help you with creating responsive and adaptive d
+
+
+## 10.7 后端并发与任务调度（5 篇）
+
+81. **[ThreadPoolExecutor in Python: The Complete Guide](https://superfastpython.com/threadpoolexecutor-in-python/)**  
+   The Python ThreadPoolExecutor provides reusable worker threads in Python. The ThreadPoolExecutor class is part of the Py
+
+82. **[concurrent.futures — Launching parallel tasks — Python 3.14.4 documentation](https://docs.python.org/3/library/concurrent.futures.html)**  
+   The concurrent.futures module provides a high-level interface for asynchronously executing callables. The asynchronous e
+
+83. **[FastAPI Background Tasks and Async Endpoints | TheCodeForge](https://thecodeforge.io/python/fastapi-background-tasks-async/)**  
+   Regular def endpoints are safe for blocking code because FastAPI manages them in an internal thread pool. The client rec
+
+84. **[How to use queue with concurrent future ThreadPoolExecutor in python 3?](https://stackoverflow.com/questions/16914665/how-to-use-queue-with-concurrent-future-threadpoolexecutor-in-python-3)**  
+   I am using simple threading modules to do concurrent jobs. Now I would like to take advantages of concurrent futures mod
+
+85. **[Concurrent.futures and Thread Pools in Python: Simplifying Parallel ...](https://calmops.com/programming/python/concurrent-futures-thread-pools/)**  
+   Python's concurrent.futures module provides a high-level interface for asynchronously executing callables using thread p
+
+
+## 10.8 数据库与存储（5 篇）
+
+86. **[JSON-Based Databases - Why NoSQL and RxDB Simplify App](https://rxdb.info/articles/json-based-database.html)**  
+   Below, we explore why JSON-based databases naturally align with NoSQL principles, how relational engines (like PostgreSQ
+
+87. **[Electron Database - Storage adapters for SQLite, Filesystem and](https://rxdb.info/electron-database.html)**  
+   SQLite is a SQL based relational database written in the C programming language that was crafted to be embedded inside o
+
+88. **[RxDB - The JSON Database Built for JavaScript | RxDB -](https://rxdb.info/articles/json-database.html)**  
+   Storing data as JSON documents in a NoSQL database is not just a trend; it s a practical choice. ... Local In-App Databa
+
+89. **[Browser storage: Do we need SQL? Or would a JSON approach be](https://almaer.com/blog/browser-storage-do-we-need-sql-or-would-a-json-approach-be-better)**  
+   So, I think that Firefox should actually support this for practical reasons (and we have SQLite right there!) but should
+
+90. **[Looking for the Best Class Library for Computing JSON Data ·](https://github.com/SPLWare/esProc/wiki/Looking-for-the-Best-Class-Library-for-Computing-JSON-Data)**  
+   Looking Looking for the Best Class Library for Computing JSON Data for ... SQLite is a lightweight, easy to integrate, e
+
+
+## 10.9 服装产业数字化与 CAD（10 篇）
+
+91. **[【AME服装智能制造展】-让服装产业更智能](https://www.ameshanghai.com/neiye?id=572)**  
+   （6）大语言模型 LLM与智能助理(或智能代理)AI Agent.（7）90%以上的中小微服装制造业数智化转型可以利用AI大模型服务平台了. 大模型的出现为广大中小微服装制造业数智化转型和高质量发展带来很好的技术支撑。
+
+92. **[Nano Banana AI时尚虚拟试衣 - AI智能生成百变造型，体验未来智慧穿搭](https://aitryon.art/zh/ai-try-on/)**  
+   8. 上传服装图片. 温馨提示. 单件服装 多件服装. 上传服装图片.服装试穿. 服装试穿.
+
+93. **[欧美服装图案设计 | 动物印花图案的时尚日记-服装星球网](https://fzthinking.com/article/details/2903)**  
+   这款印花图案适合用于休闲或派对场合的服装，无论是T恤、连衣裙还是帽子，都能展现出穿着者轻松愉快的心情。这款印花图案适合用于圣诞主题的服装，为冬日的寒冷带来一抹温暖。
+
+94. **[数字孪生应用技术 ¦ 星空游戏平台 - 星空游戏平台](https://www.annming.com/school-of-art-and-design/digital-twin-technology)**  
+   FEATURES专业特色核心技术引领，定位前沿领域 专业以数字孪生技术应用为核心，精准面向智能制造与智慧建筑等产业项目实战驱动，对接真实场景 依托企业真实项目开展教学，将数字孪生技术深度应用于智能制造与智...
+
+95. **[CHJZKRMRB18B20240911C](http://paper.people.com.cn/rmrb/images/2024-09/11/18/rmrb2024091118.pdf)**  
+   工业通飞研制的一款 5 座 AG—EX 缩比 技术验证机也处于试飞和开发中。批关键共性技术。 联合体计划 3 年内在电化学储能、物理储能.
+
+96. **[Pattern Digitizing Products - Digitizing Software and Systems for CAD.](https://www.patterndigitizing.com/)**  
+   Quickly convert 2D physical patterns into a true to size vector files using N-hega Softwares for Automatic Pattern Digit
+
+97. **[Pattern Drafting, Editing, Nesting, and Machine Control » PatternSmith](https://patternsmith.com/)**  
+   PatternSmith is a 2D drafting system built specifically for textile pattern creation and management. Organize and nest p
+
+98. **[Pattern Digitizing](https://www.smartpatternmaking.com/pages/pattern-digitizing)**  
+   A: Pattern digitizing involves converting paper patterns into digital files that can be used in computer-aided design (C
+
+99. **[V-Shoot Camera Digitizing System | Fast Pattern Capture](https://velocityplotters.com/v-shoot-camera-digitizing-system/)**  
+   Transform your workflow with the V-Shoot Camera Digitizing System, a cutting-edge solution designed to convert physical
+
+100. **[Digitize Sewing Patterns with PatternScan Pro](https://patternscan-pro.com/)**  
+   Photograph your paper pattern and get an accurate digital version automatically. Export as SVG, DXF, or PACX for Illustr

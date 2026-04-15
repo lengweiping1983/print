@@ -118,6 +118,5 @@ class ExportRequest(BaseModel):
     format: Literal["png", "pdf", "svg", "zip"] = "zip"
     dpi: int = 300
     transparent: bool = True
-    include_outline: bool = True
-    include_labels: bool = True
-
+    include_outline: bool = False
+    include_labels: bool = False
