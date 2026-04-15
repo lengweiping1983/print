@@ -53,6 +53,57 @@ def make_layout_template(
     return out_path
 
 
+def make_red_marker_mask(
+    image_path: Path,
+    out_path: Path,
+    red_min: int = 145,
+    red_delta: int = 45,
+) -> Path | None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(image_path).convert("RGBA") as img:
+        r, g, b, alpha = img.split()
+        max_non_red = ImageChops.lighter(g, b)
+        strong_red = ImageChops.subtract(r, max_non_red)
+        mask = r.point(lambda value: 255 if value >= red_min else 0)
+        mask = ImageChops.multiply(mask, strong_red.point(lambda value: 255 if value >= red_delta else 0))
+        mask = ImageChops.multiply(mask, alpha.point(lambda value: 255 if value > 10 else 0))
+
+    if not mask.getbbox():
+        out_path.unlink(missing_ok=True)
+        return None
+
+    mask.save(out_path)
+    return out_path
+
+
+def write_piece_marker_masks(pieces: list[dict], marker_mask_path: Path | None) -> int:
+    if not marker_mask_path or not marker_mask_path.exists():
+        return 0
+
+    count = 0
+    with Image.open(marker_mask_path).convert("L") as full_marker:
+        for piece in pieces:
+            bbox = piece["bbox"]
+            box = (bbox["x"], bbox["y"], bbox["x"] + bbox["width"], bbox["y"] + bbox["height"])
+            marker = full_marker.crop(box)
+            with Image.open(piece["mask_path"]).convert("L") as piece_mask:
+                marker = ImageChops.multiply(marker, piece_mask)
+            marker_path = marker_path_for_mask(Path(piece["mask_path"]))
+            if marker.getbbox():
+                marker.save(marker_path)
+                piece["marker_path"] = marker_path
+                count += 1
+            else:
+                marker_path.unlink(missing_ok=True)
+    return count
+
+
+def marker_path_for_mask(mask_path: Path) -> Path:
+    stem = mask_path.stem
+    marker_stem = f"{stem[:-5]}_markers" if stem.endswith("_mask") else f"{stem}_markers"
+    return mask_path.with_name(f"{marker_stem}.png")
+
+
 def _scanline_edge_connected_background(candidate: bytes, width: int, height: int) -> bytearray:
     background = bytearray(width * height)
     queue: deque[tuple[int, int, int]] = deque()
@@ -291,9 +342,22 @@ def render_piece(mask_path: Path, texture_path: Path, transform: dict, out_path:
         for x in range(start_x, mask.width + tile.width, tile.width):
             canvas.alpha_composite(tile, (x, y))
     canvas.putalpha(mask)
+    composite_piece_markers(canvas, mask_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out_path)
     return out_path
+
+
+def composite_piece_markers(canvas: Image.Image, mask_path: Path) -> None:
+    marker_path = marker_path_for_mask(mask_path)
+    if not marker_path.exists():
+        return
+    with Image.open(marker_path).convert("L") as marker:
+        if marker.size != canvas.size or not marker.getbbox():
+            return
+        overlay = Image.new("RGBA", canvas.size, (239, 0, 40, 255))
+        overlay.putalpha(marker)
+        canvas.alpha_composite(overlay)
 
 
 def render_piece_svg(mask_path: Path, out_path: Path) -> Path:

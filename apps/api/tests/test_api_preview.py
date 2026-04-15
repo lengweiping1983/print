@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from app.db import storage_path
+from app.image_ops import marker_path_for_mask
 from app.main import app
 
 
@@ -39,6 +40,7 @@ def test_jpeg_layout_image_import_creates_piece_masks() -> None:
         layout = Image.new("RGB", (240, 140), (255, 255, 255))
         draw = ImageDraw.Draw(layout)
         draw.rectangle((12, 12, 102, 120), fill=(18, 42, 104))
+        draw.rectangle((44, 18, 58, 22), fill=(238, 0, 40))
         draw.rectangle((142, 24, 222, 112), fill=(18, 42, 104))
         buf = BytesIO()
         layout.save(buf, format="JPEG", quality=95)
@@ -56,6 +58,8 @@ def test_jpeg_layout_image_import_creates_piece_masks() -> None:
         assert len(imported["pieces"]) == 2
         for piece in imported["pieces"]:
             assert storage_path(piece["mask_path"]).exists()
+        marker_paths = [marker_path_for_mask(storage_path(piece["mask_path"])) for piece in imported["pieces"]]
+        assert any(path.exists() for path in marker_paths)
 
 
 def wait_job(client: TestClient, job_id: str) -> dict:
