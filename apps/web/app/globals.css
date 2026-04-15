@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f3f6f8;
+  color: #202632;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.checkerboard {
+  background-image:
+    linear-gradient(45deg, #e8edf2 25%, transparent 25%),
+    linear-gradient(-45deg, #e8edf2 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #e8edf2 75%),
+    linear-gradient(-45deg, transparent 75%, #e8edf2 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+}
+

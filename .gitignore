@@ -1,0 +1,15 @@
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+storage/*
+!storage/.gitkeep
+!storage/projects/
+storage/projects/*
+!storage/projects/.gitkeep
+

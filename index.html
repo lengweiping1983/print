@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>服装裁片系统</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>服装裁片系统</h1>
+      <p class="subtitle">上传小参考图和整套总 mask，自动拆片、贴图、预览、导出。</p>
+    </div>
+    <div class="actions">
+      <button id="resetCurrentBtn" class="secondary">重置当前裁片参数</button>
+      <button id="exportPreviewBtn" class="primary">导出整套预览 PNG</button>
+      <button id="exportAllBtn" class="primary">导出全部裁片 PNG</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>1. 上传素材</h2>
+        <label class="field">
+          <span>小参考图</span>
+          <input type="file" id="refInput" accept="image/*" />
+        </label>
+        <div id="refName" class="hint">未选择文件</div>
+
+        <label class="field">
+          <span>整套总 mask（PNG，透明背景）</span>
+          <input type="file" id="maskInput" accept="image/png,image/*" />
+        </label>
+        <div id="maskName" class="hint">未选择文件</div>
+        <p class="hint">支持透明背景 alpha mask。系统会按连通区域自动拆成多个裁片。</p>
+      </section>
+
+      <section class="panel">
+        <h2>2. 大面料图生成</h2>
+        <div class="field-row">
+          <label class="field small"><span>铺满宽度</span><input id="tileWidth" type="number" value="2048" min="256" step="64"></label>
+          <label class="field small"><span>铺满高度</span><input id="tileHeight" type="number" value="2048" min="256" step="64"></label>
+        </div>
+        <label class="field">
+          <span>基础缩放 <strong id="baseScaleText">1.00</strong></span>
+          <input id="baseScale" type="range" min="0.2" max="6" step="0.05" value="1">
+        </label>
+        <label class="field">
+          <span>平铺间距 <strong id="tileGapText">0</strong></span>
+          <input id="tileGap" type="range" min="0" max="128" step="1" value="0">
+        </label>
+        <div class="btn-row">
+          <button id="generateBtn" class="primary full">生成大面料图</button>
+        </div>
+        <canvas id="fabricThumb" class="thumb" width="280" height="280"></canvas>
+      </section>
+
+      <section class="panel">
+        <h2>3. 当前裁片参数</h2>
+        <label class="field">
+          <span>平移 X <strong id="offsetXText">0</strong></span>
+          <input id="offsetX" type="range" min="-1500" max="1500" step="1" value="0">
+        </label>
+        <label class="field">
+          <span>平移 Y <strong id="offsetYText">0</strong></span>
+          <input id="offsetY" type="range" min="-1500" max="1500" step="1" value="0">
+        </label>
+        <label class="field">
+          <span>缩放 <strong id="scaleText">1.00</strong></span>
+          <input id="pieceScale" type="range" min="0.2" max="6" step="0.01" value="1">
+        </label>
+        <label class="field">
+          <span>旋转 <strong id="rotationText">0°</strong></span>
+          <input id="rotation" type="range" min="-180" max="180" step="1" value="0">
+        </label>
+        <div class="check-row">
+          <label><input id="mirrorX" type="checkbox"> 左右镜像</label>
+          <label><input id="mirrorY" type="checkbox"> 上下镜像</label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>4. 裁片列表</h2>
+        <div id="pieceList" class="piece-list empty">请先上传总 mask。</div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <section class="panel canvas-panel">
+        <div class="panel-title">左侧：当前裁片单独预览（可拖拽）</div>
+        <div class="canvas-wrap large">
+          <canvas id="pieceCanvas" width="900" height="760"></canvas>
+        </div>
+      </section>
+
+      <section class="panel canvas-panel">
+        <div class="panel-title">右侧：整套排版预览</div>
+        <div class="canvas-wrap small">
+          <canvas id="previewCanvas" width="860" height="760"></canvas>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">建议使用 Chrome 打开。可直接双击 index.html，也可用本地静态服务运行。</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
