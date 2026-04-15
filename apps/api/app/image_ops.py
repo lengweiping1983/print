@@ -1,12 +1,18 @@
-import math
 import base64
+import math
+import warnings
 from collections import deque
+from io import BytesIO
 from pathlib import Path
 from typing import Iterable
 
 from PIL import Image, ImageChops, ImageDraw, ImageOps
+from PIL.Image import DecompressionBombWarning
 
-from .config import MIN_COMPONENT_AREA
+from .config import MAX_IMAGE_PIXELS, MIN_COMPONENT_AREA
+
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+warnings.simplefilter("error", DecompressionBombWarning)
 
 try:
     import cv2
@@ -18,10 +24,22 @@ except Exception:  # pragma: no cover - fallback keeps Pillow-only installs usab
 
 def image_size(path: Path) -> tuple[int, int]:
     with Image.open(path) as img:
+        ensure_dimensions_within_limit(*img.size)
         return img.size
 
 
+def ensure_dimensions_within_limit(width: int, height: int) -> None:
+    pixels = int(width) * int(height)
+    if pixels > MAX_IMAGE_PIXELS:
+        raise ValueError(f"图片尺寸过大：{width}x{height}，超过 {MAX_IMAGE_PIXELS} 像素上限。")
+
+
+def ensure_image_within_limit(path: Path) -> tuple[int, int]:
+    return image_size(path)
+
+
 def has_transparent_alpha(image_path: Path, transparent_threshold: int = 250) -> bool:
+    ensure_image_within_limit(image_path)
     with Image.open(image_path) as img:
         if img.mode not in {"RGBA", "LA"} and "transparency" not in img.info:
             return False
@@ -36,6 +54,7 @@ def make_layout_template(
     white_threshold: int = 240,
     channel_delta: int = 28,
 ) -> Path:
+    ensure_image_within_limit(image_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(image_path).convert("RGBA") as img:
         r, g, b, alpha = img.split()
@@ -71,6 +90,7 @@ def make_red_marker_mask(
     red_min: int = 145,
     red_delta: int = 45,
 ) -> Path | None:
+    ensure_image_within_limit(image_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(image_path).convert("RGBA") as img:
         r, g, b, alpha = img.split()
@@ -194,6 +214,7 @@ def extract_alpha_components(
     out_dir: Path,
     min_area: int = MIN_COMPONENT_AREA,
 ) -> list[dict]:
+    ensure_image_within_limit(image_path)
     out_dir.mkdir(parents=True, exist_ok=True)
     with Image.open(image_path).convert("RGBA") as img:
         alpha = img.getchannel("A")
@@ -385,12 +406,10 @@ def bbox_polygon(min_x: int, min_y: int, max_x: int, max_y: int) -> list[list[in
 
 
 def make_mirror_tile(source_path: Path, out_path: Path, width: int, height: int) -> tuple[int, int]:
+    ensure_image_within_limit(source_path)
+    ensure_dimensions_within_limit(width, height)
     with Image.open(source_path).convert("RGBA") as src:
-        tile = Image.new("RGBA", (src.width * 2, src.height * 2), (0, 0, 0, 0))
-        tile.alpha_composite(src, (0, 0))
-        tile.alpha_composite(ImageOps.mirror(src), (src.width, 0))
-        tile.alpha_composite(ImageOps.flip(src), (0, src.height))
-        tile.alpha_composite(ImageOps.mirror(ImageOps.flip(src)), (src.width, src.height))
+        tile = make_mirror_tile_image(src)
         out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         for y in range(0, height, tile.height):
             for x in range(0, width, tile.width):
@@ -399,7 +418,18 @@ def make_mirror_tile(source_path: Path, out_path: Path, width: int, height: int)
     return width, height
 
 
+def make_mirror_tile_image(src: Image.Image) -> Image.Image:
+    tile = Image.new("RGBA", (src.width * 2, src.height * 2), (0, 0, 0, 0))
+    tile.alpha_composite(src, (0, 0))
+    tile.alpha_composite(ImageOps.mirror(src), (src.width, 0))
+    tile.alpha_composite(ImageOps.flip(src), (0, src.height))
+    tile.alpha_composite(ImageOps.mirror(ImageOps.flip(src)), (src.width, src.height))
+    return tile
+
+
 def make_offset_tile(source_path: Path, out_path: Path, width: int, height: int) -> tuple[int, int]:
+    ensure_image_within_limit(source_path)
+    ensure_dimensions_within_limit(width, height)
     with Image.open(source_path).convert("RGBA") as src:
         canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         for y in range(0, height + src.height, src.height):
@@ -411,8 +441,18 @@ def make_offset_tile(source_path: Path, out_path: Path, width: int, height: int)
 
 
 def render_piece(mask_path: Path, texture_path: Path, transform: dict, out_path: Path) -> Path:
+    canvas = render_piece_image(mask_path, texture_path, transform)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(out_path)
+    canvas.close()
+    return out_path
+
+
+def render_piece_image(mask_path: Path, texture_path: Path, transform: dict) -> Image.Image:
     if transform.get("mode") == "global_canvas" and transform.get("global_enabled", True):
-        return render_piece_from_design_canvas(mask_path, texture_path, transform, out_path)
+        return render_piece_from_design_canvas_image(mask_path, texture_path, transform)
+    ensure_image_within_limit(mask_path)
+    ensure_image_within_limit(texture_path)
     mask = Image.open(mask_path).convert("L")
     texture = Image.open(texture_path).convert("RGBA")
     canvas = Image.new("RGBA", mask.size, (0, 0, 0, 0))
@@ -437,12 +477,22 @@ def render_piece(mask_path: Path, texture_path: Path, transform: dict, out_path:
             canvas.alpha_composite(tile, (x, y))
     canvas.putalpha(mask)
     composite_piece_markers(canvas, mask_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(out_path)
-    return out_path
+    mask.close()
+    texture.close()
+    return canvas
 
 
 def render_piece_from_design_canvas(mask_path: Path, design_canvas_path: Path, transform: dict, out_path: Path) -> Path:
+    sample = render_piece_from_design_canvas_image(mask_path, design_canvas_path, transform)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    sample.save(out_path)
+    sample.close()
+    return out_path
+
+
+def render_piece_from_design_canvas_image(mask_path: Path, design_canvas_path: Path, transform: dict) -> Image.Image:
+    ensure_image_within_limit(mask_path)
+    ensure_image_within_limit(design_canvas_path)
     mask = Image.open(mask_path).convert("L")
     with Image.open(design_canvas_path).convert("RGBA") as design_canvas:
         design_x = float(transform.get("design_x", 0) or 0) + float(transform.get("offset_x", 0) or 0)
@@ -460,9 +510,8 @@ def render_piece_from_design_canvas(mask_path: Path, design_canvas_path: Path, t
             sample = rotated
     sample.putalpha(mask)
     composite_piece_markers(sample, mask_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    sample.save(out_path)
-    return out_path
+    mask.close()
+    return sample
 
 
 def sample_design_region(
@@ -501,11 +550,11 @@ def composite_piece_markers(canvas: Image.Image, mask_path: Path) -> None:
 
 
 def render_piece_svg(mask_path: Path, out_path: Path) -> Path:
+    ensure_image_within_limit(mask_path)
     with Image.open(mask_path).convert("L") as mask:
-        png_path = out_path.with_suffix(".mask.png")
-        mask.save(png_path)
-        encoded = base64.b64encode(png_path.read_bytes()).decode("ascii")
-        png_path.unlink(missing_ok=True)
+        buffer = BytesIO()
+        mask.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
         svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{mask.width}" height="{mask.height}" viewBox="0 0 {mask.width} {mask.height}">
   <title>{out_path.stem} cutting mask</title>
   <image width="{mask.width}" height="{mask.height}" href="data:image/png;base64,{encoded}" />
@@ -537,14 +586,14 @@ def render_layout(
     include_outline: bool = True,
     include_labels: bool = True,
 ) -> Path:
+    ensure_dimensions_within_limit(*canvas_size)
+    ensure_image_within_limit(texture_path)
     out = Image.new("RGBA", canvas_size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(out)
     for piece in pieces:
-        tmp_path = out_path.parent / f"_{piece['id']}.png"
-        render_piece(Path(piece["mask_path"]), texture_path, piece["transform"], tmp_path)
-        with Image.open(tmp_path).convert("RGBA") as rendered:
-            out.alpha_composite(rendered, (piece["source_x"], piece["source_y"]))
-        tmp_path.unlink(missing_ok=True)
+        rendered = render_piece_image(Path(piece["mask_path"]), texture_path, piece["transform"])
+        out.alpha_composite(rendered, (piece["source_x"], piece["source_y"]))
+        rendered.close()
         if include_outline:
             bbox = piece["bbox"]
             draw.rectangle(

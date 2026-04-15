@@ -186,3 +186,67 @@ export type Job = {
   created_at: string;
   updated_at: string;
 };
+
+export type TemplateSet = {
+  id: string;
+  name: string;
+  garment_type: "unknown" | "t_shirt" | "shirt";
+  version_label: string;
+  description: string;
+  base_size_template_id: string;
+  design_canvas: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SetPieceDef = {
+  id: string;
+  set_id: string;
+  piece_role: string;
+  name: string;
+  sort_order: number;
+  base_transform: PieceTransform;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SizeTemplate = {
+  id: string;
+  set_id: string;
+  size_name: string;
+  asset_id: string;
+  template_source: string;
+  template_path: string;
+  template_url: string;
+  red_marker_path: string;
+  red_marker_url: string;
+  red_marker_count: number;
+  width: number;
+  height: number;
+  pieces_count: number;
+  is_base: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SizeTemplatePiece = {
+  id: string;
+  size_template_id: string;
+  piece_def_id: string;
+  name: string;
+  piece_role: string;
+  mask_path: string;
+  mask_url: string;
+  polygon: number[][];
+  bbox: { x: number; y: number; width: number; height: number };
+  source_x: number;
+  source_y: number;
+  width: number;
+  height: number;
+  area: number;
+  centroid_x: number;
+  centroid_y: number;
+  scale_to_base: number;
+  created_at: string;
+  updated_at: string;
+};

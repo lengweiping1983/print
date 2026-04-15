@@ -169,3 +169,90 @@ class ExportRequest(BaseModel):
     transparent: bool = True
     include_outline: bool = False
     include_labels: bool = False
+
+
+class TemplateSetCreate(BaseModel):
+    name: str
+    garment_type: Literal["unknown", "t_shirt", "shirt"] = "unknown"
+    version_label: str = ""
+    description: str = ""
+
+
+class TemplateSetOut(BaseModel):
+    id: str
+    name: str
+    garment_type: str
+    version_label: str
+    description: str
+    base_size_template_id: str
+    design_canvas: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+class SetPieceDefOut(BaseModel):
+    id: str
+    set_id: str
+    piece_role: str
+    name: str
+    sort_order: int
+    base_transform: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+class SetPieceDefPatch(BaseModel):
+    piece_role: str = ""
+    name: str = ""
+    sort_order: int = -1
+
+
+class SizeTemplateOut(BaseModel):
+    id: str
+    set_id: str
+    size_name: str
+    asset_id: str
+    template_source: str
+    template_path: str
+    template_url: str = ""
+    red_marker_path: str
+    red_marker_url: str = ""
+    red_marker_count: int
+    width: int
+    height: int
+    pieces_count: int
+    is_base: bool
+    created_at: str
+    updated_at: str
+
+
+class SizeTemplatePieceOut(BaseModel):
+    id: str
+    size_template_id: str
+    piece_def_id: str
+    name: str
+    piece_role: str
+    mask_path: str
+    mask_url: str
+    polygon: list[list[int]]
+    bbox: dict[str, int]
+    source_x: int
+    source_y: int
+    width: int
+    height: int
+    area: int
+    centroid_x: float
+    centroid_y: float
+    scale_to_base: float
+    created_at: str
+    updated_at: str
+
+
+class SizeTemplatePiecePatch(BaseModel):
+    piece_def_id: str = ""
+
+
+class ProjectFromTemplateRequest(BaseModel):
+    set_id: str
+    size_name: str
+    copy_design_from_base: bool = True

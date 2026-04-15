@@ -54,7 +54,12 @@ print/
 │       ├── app/
 │       │   ├── layout.tsx           # 根布局（中文 lang）
 │       │   ├── page.tsx             # 入口页，渲染 StudioPage
-│       │   └── globals.css          # Tailwind + 全局样式 + checkerboard 背景
+│       │   ├── globals.css          # Tailwind + 全局样式 + checkerboard 背景
+│       │   └── templates/           # 模板套装配置管理页面
+│       │       ├── page.tsx         # 套装列表
+│       │       ├── new/page.tsx     # 新建套装
+│       │       ├── [setId]/page.tsx # 套装详情（尺寸管理）
+│       │       └── [setId]/sizes/[sizeId]/page.tsx # 尺寸裁片校正
 │       ├── components/
 │       │   ├── StudioPage.tsx       # 主业务页面：左侧素材/裁片、中间画布、右侧参数
 │       │   └── KonvaWorkspace.tsx   # 双画布 Konva 工作区（单片校正 + 整套排版）
@@ -135,6 +140,10 @@ npm run typecheck
 | `POST /api/projects/{id}/render/preview` | 创建整套预览渲染任务 |
 | `POST /api/projects/{id}/exports` | 创建导出 ZIP 任务 |
 | `GET /api/jobs/{job_id}` | 查询任务状态 |
+| `POST /api/template-sets` / `GET /api/template-sets` | 创建/查询模板套装 |
+| `POST /api/template-sets/{id}/sizes/import` | 导入尺寸模板并自动拆片识别 |
+| `GET /api/template-sets/{id}/piece-defs` | 获取套装级裁片定义 |
+| `POST /api/projects/from-template-set` | 从已配置的套装+尺寸创建项目 |
 | `/files/{path}` | 静态文件服务（挂载 `storage/`） |
 
 ### 任务队列（jobs.py）
@@ -153,12 +162,17 @@ SQLite 核心表：
 - `pieces`：拆分后的裁片（mask_path、polygon、bbox、source_x/y、transform JSON）
 - `textures`：纹理记录（source_path、seamless_path、provider、prompt）
 - `jobs`：异步任务记录（status、progress、input/output JSON）
+- `template_sets`：模板套装（名称、衣服类型、版本、基准尺寸 ID、design_canvas）
+- `set_piece_defs`：套装级裁片定义（piece_role、name、sort_order、base_transform）
+- `size_templates`：各尺寸模板实例（关联 template_sets，含 template_path、is_base）
+- `size_template_pieces`：尺寸下的裁片几何实例（mask、bbox、scale_to_base、关联 piece_def_id）
 
 所有 JSON 字段在 Python 层通过 `json.dumps` / `json.loads` 读写。
 
 ### 图像算法（image_ops.py）
 
 - `extract_alpha_components`：基于 alpha 通道的 Flood Fill（四连通），过滤小于 `MIN_COMPONENT_AREA` (1000) 像素的噪点，输出单裁片 mask PNG。
+- `match_pieces_to_base`（`template_ops.py`）：将新尺寸拆出的裁片按面积、长宽比、水平位置匹配到基准模板的 `piece_def_id`，并计算 `scale_to_base`。
 - `make_mirror_tile`：2x2 镜像平铺生成无缝图。
 - `make_offset_tile`：Offset 位移法生成无缝图。
 - `render_piece`：按 transform（scale、rotation、mirror、offset）将纹理渲染到单裁片 mask 上。
@@ -180,8 +194,9 @@ SQLite 核心表：
 
 ### 页面与组件
 
-- `StudioPage.tsx`：主页面，状态驱动。挂载时自动创建项目。核心状态包括 `project`、`pieces`、`textures`、`selectedPieceId`、`job`。
+- `StudioPage.tsx`：主页面，状态驱动。挂载时自动创建项目。核心状态包括 `project`、`pieces`、`textures`、`selectedPieceId`、`job`。支持"从模板套装创建"快捷入口。
 - `KonvaWorkspace.tsx`：双画布交互区。
+- `templates/*.tsx`：模板套装配置管理页面。支持上传多尺寸白底图、自动拆片识别、设定基准尺寸、手动修正裁片关联。
   - 左侧「单片校正」：显示当前选中裁片的 mask 轮廓 + 可拖拽的纹理图，支持鼠标拖动微调花位。
   - 右侧「整套排版」：按原始 source_x/source_y 显示所有裁片边框，可点击选中，支持缩放适配。
 
@@ -195,6 +210,7 @@ SQLite 核心表：
 前后端对齐的核心类型：
 
 - `Project`、`Asset`、`Piece`、`PieceTransform`、`Texture`、`Job`
+- `TemplateSet`、`SetPieceDef`、`SizeTemplate`、`SizeTemplatePiece`
 
 前端直接从 `@print-studio/shared-types` 导入；后端目前使用 Pydantic 独立定义（`schemas.py`），字段语义与共享类型保持一致。
 
@@ -234,3 +250,5 @@ SQLite 核心表：
 | 新增前后端共享类型 | `packages/shared-types/src/index.ts` + `apps/api/app/schemas.py` |
 | 修改任务调度逻辑 | `apps/api/app/jobs.py` |
 | 修改数据库 schema | `apps/api/app/db.py`（注意已有数据的兼容性） |
+| 新增/修改模板套装逻辑 | `apps/api/app/main.py` + `apps/api/app/template_ops.py` |
+| 调整模板配置页面 | `apps/web/app/templates/**/*.tsx` |

@@ -1,11 +1,14 @@
 import base64
-import json
 import os
 import time
-import urllib.request
 from pathlib import Path
 
+import httpx
 from PIL import Image, ImageDraw
+
+
+HTTP_TIMEOUT = httpx.Timeout(connect=10, read=120, write=30, pool=10)
+RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
 class ImageProvider:
@@ -45,18 +48,17 @@ class OpenAIImageProvider(ImageProvider):
             "prompt": prompt,
             "size": size,
         }
-        req = urllib.request.Request(
+        data = request_json(
+            "POST",
             "https://api.openai.com/v1/images/generations",
-            data=json.dumps(payload).encode("utf-8"),
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            method="POST",
+            payload=payload,
         )
-        with urllib.request.urlopen(req, timeout=180) as res:
-            data = json.loads(res.read().decode("utf-8"))
         b64 = data["data"][0].get("b64_json")
         if not b64:
             raise RuntimeError("OpenAI image response did not include b64_json")
         raw = base64.b64decode(b64)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(raw)
         normalize_size(out_path, width, height)
         return width, height
@@ -74,25 +76,22 @@ class ReplicateProvider(ImageProvider):
             "version": model_version,
             "input": {"prompt": prompt, "width": width, "height": height, "seed": int(seed) if seed.isdigit() else None},
         }
-        req = urllib.request.Request(
+        data = request_json(
+            "POST",
             "https://api.replicate.com/v1/predictions",
-            data=json.dumps(payload).encode("utf-8"),
             headers={"Authorization": f"Token {api_token}", "Content-Type": "application/json"},
-            method="POST",
+            payload=payload,
         )
-        with urllib.request.urlopen(req, timeout=180) as res:
-            data = json.loads(res.read().decode("utf-8"))
         prediction_id = data.get("id")
         if not prediction_id:
             raise RuntimeError("Replicate response did not include prediction id")
         for _ in range(90):
-            poll_req = urllib.request.Request(
+            data = request_json(
+                "GET",
                 f"https://api.replicate.com/v1/predictions/{prediction_id}",
                 headers={"Authorization": f"Token {api_token}"},
-                method="GET",
+                retries=1,
             )
-            with urllib.request.urlopen(poll_req, timeout=60) as res:
-                data = json.loads(res.read().decode("utf-8"))
             if data.get("status") == "succeeded":
                 output = data.get("output")
                 url = output[0] if isinstance(output, list) else output
@@ -130,5 +129,44 @@ def normalize_size(path: Path, width: int, height: int) -> None:
 
 def download_to(url: str, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url, timeout=120) as res:
-        path.write_bytes(res.read())
+    path.write_bytes(request_bytes(url))
+
+
+def request_json(method: str, url: str, *, headers: dict[str, str], payload: dict | None = None, retries: int = 2) -> dict:
+    with httpx.Client(timeout=HTTP_TIMEOUT) as client:
+        response = request_with_retry(client, method, url, headers=headers, json_payload=payload, retries=retries)
+        return response.json()
+
+
+def request_bytes(url: str, retries: int = 2) -> bytes:
+    with httpx.Client(timeout=HTTP_TIMEOUT) as client:
+        response = request_with_retry(client, "GET", url, headers={}, json_payload=None, retries=retries)
+        return response.content
+
+
+def request_with_retry(
+    client: httpx.Client,
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str],
+    json_payload: dict | None,
+    retries: int,
+) -> httpx.Response:
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            response = client.request(method, url, headers=headers, json=json_payload)
+            if response.status_code in RETRY_STATUSES and attempt < retries:
+                time.sleep(1 + attempt)
+                continue
+            response.raise_for_status()
+            return response
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
+            last_error = exc
+            retryable_status = isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in RETRY_STATUSES
+            if attempt < retries and (not isinstance(exc, httpx.HTTPStatusError) or retryable_status):
+                time.sleep(1 + attempt)
+                continue
+            break
+    raise RuntimeError(f"图片服务请求失败：{last_error}") from last_error

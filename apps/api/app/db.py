@@ -94,6 +94,69 @@ create table if not exists jobs (
   created_at text not null,
   updated_at text not null
 );
+
+create table if not exists template_sets (
+  id text primary key,
+  name text not null,
+  garment_type text not null default 'unknown',
+  version_label text not null default '',
+  description text not null default '',
+  base_size_template_id text not null default '',
+  design_canvas text not null default '{}',
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists set_piece_defs (
+  id text primary key,
+  set_id text not null,
+  piece_role text not null default 'unknown',
+  name text not null,
+  sort_order integer not null default 0,
+  base_transform text not null default '{}',
+  created_at text not null,
+  updated_at text not null,
+  foreign key(set_id) references template_sets(id)
+);
+
+create table if not exists size_templates (
+  id text primary key,
+  set_id text not null,
+  size_name text not null,
+  asset_id text not null,
+  template_source text not null,
+  template_path text not null,
+  red_marker_path text not null default '',
+  red_marker_count integer not null default 0,
+  width integer not null default 0,
+  height integer not null default 0,
+  pieces_count integer not null default 0,
+  is_base boolean not null default false,
+  created_at text not null,
+  updated_at text not null,
+  foreign key(set_id) references template_sets(id)
+);
+
+create table if not exists size_template_pieces (
+  id text primary key,
+  size_template_id text not null,
+  piece_def_id text not null,
+  mask_path text not null,
+  polygon text not null,
+  bbox text not null,
+  source_x integer not null,
+  source_y integer not null,
+  width integer not null,
+  height integer not null,
+  area integer not null,
+  centroid_x real not null,
+  centroid_y real not null,
+  scale_to_base real not null default 1.0,
+  created_at text not null,
+  updated_at text not null,
+  foreign key(size_template_id) references size_templates(id),
+  foreign key(piece_def_id) references set_piece_defs(id)
+);
 """
 
 

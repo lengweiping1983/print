@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageColor, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageColor, ImageDraw, ImageFont
+
+from .image_ops import ensure_dimensions_within_limit, ensure_image_within_limit, make_mirror_tile_image
 
 
 def build_design_texture_canvas(
@@ -20,13 +22,15 @@ def build_design_texture_canvas(
     offset_y = int(float(design_canvas.get("texture_offset_y", 0) or 0))
     tile_enabled = bool(design_canvas.get("tile", True))
     mirror = bool(design_canvas.get("mirror", False))
+    ensure_dimensions_within_limit(width, height)
+    ensure_image_within_limit(texture_path)
 
     with Image.open(texture_path).convert("RGBA") as src:
         tile_w = max(1, int(src.width * scale))
         tile_h = max(1, int(src.height * scale))
         tile = src.resize((tile_w, tile_h), Image.Resampling.LANCZOS)
         if mirror:
-            tile = _mirror_tile(tile)
+            tile = make_mirror_tile_image(tile)
         if angle:
             tile = tile.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
         canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -93,15 +97,6 @@ def build_fit_preview(
     from .image_ops import render_layout
 
     return render_layout(pieces, design_canvas_path, out_path, canvas_size)
-
-
-def _mirror_tile(src: Image.Image) -> Image.Image:
-    tile = Image.new("RGBA", (src.width * 2, src.height * 2), (0, 0, 0, 0))
-    tile.alpha_composite(src, (0, 0))
-    tile.alpha_composite(ImageOps.mirror(src), (src.width, 0))
-    tile.alpha_composite(ImageOps.flip(src), (0, src.height))
-    tile.alpha_composite(ImageOps.mirror(ImageOps.flip(src)), (src.width, src.height))
-    return tile
 
 
 def _draw_design_layers(canvas: Image.Image, design_canvas: dict[str, Any], asset_paths: dict[str, Path]) -> None:

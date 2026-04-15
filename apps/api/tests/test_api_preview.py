@@ -33,6 +33,27 @@ def test_preview_creates_default_texture_when_none_exists() -> None:
         assert job["output"]["preview_url"].endswith("preview.png")
 
 
+def test_upload_rejects_oversized_image(monkeypatch) -> None:
+    from app import image_ops
+
+    monkeypatch.setattr(image_ops, "MAX_IMAGE_PIXELS", 10)
+    client = TestClient(app)
+    with client:
+        project = client.post("/api/projects", json={"name": "oversized upload"}).json()
+        image = Image.new("RGBA", (4, 4), (255, 255, 255, 255))
+        buf = BytesIO()
+        image.save(buf, format="PNG")
+        buf.seek(0)
+        response = client.post(
+            f"/api/projects/{project['id']}/assets",
+            data={"kind": "template"},
+            files={"file": ("too-large.png", buf, "image/png")},
+        )
+
+        assert response.status_code == 413
+        assert "图片尺寸过大" in response.text
+
+
 def test_jpeg_layout_image_import_creates_piece_masks() -> None:
     client = TestClient(app)
     with client:

@@ -1,10 +1,11 @@
 "use client";
 
-import type { Asset, DesignCanvas, DesignLayer, GlobalFitOptions, Job, Piece, PieceTransform, Project, SafetyReportItem, Texture } from "@print-studio/shared-types";
+import type { Asset, DesignCanvas, DesignLayer, GlobalFitOptions, Job, Piece, PieceTransform, Project, SizeTemplate, TemplateSet, Texture } from "@print-studio/shared-types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, waitForJob } from "@/lib/api";
 import { PIECE_ROLE_LABELS, JOB_TYPE_LABELS, JOB_STATUS_LABELS } from "@/lib/labels";
+import { FileField, LayoutPreviewLoading, LayerEditor, Panel, Range, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
 
 const SinglePieceCalibration = dynamic(() => import("./KonvaWorkspace").then((mod) => mod.SinglePieceCalibration), {
   ssr: false,
@@ -15,6 +16,8 @@ const LayoutPreview = dynamic(() => import("./KonvaWorkspace").then((mod) => mod
   ssr: false,
   loading: () => <LayoutPreviewLoading />
 });
+
+const LAST_PROJECT_KEY = "print-studio:last-project-id";
 
 const emptyTransform: PieceTransform = {
   offset_x: 0,
@@ -55,16 +58,33 @@ export function StudioPage() {
   const [autoRenderingDesign, setAutoRenderingDesign] = useState(false);
   const prevJobRef = useRef<Job | null>(null);
   const layerRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
+  const [templateSets, setTemplateSets] = useState<TemplateSet[]>([]);
+  const [selectedSetId, setSelectedSetId] = useState("");
+  const [selectedSetSizes, setSelectedSetSizes] = useState<SizeTemplate[]>([]);
+  const [copyDesignFromBase, setCopyDesignFromBase] = useState(true);
 
   useEffect(() => {
-    api
-      .createProject()
-      .then((created) => {
-        setProject(created);
-        setDesignCanvas(readDesignCanvas(created));
-        setNotice("项目已创建，先上传透明 PNG/WebP 裁片模板或白底排版原图。");
-      })
-      .catch((error) => setNotice(error.message));
+    let active = true;
+    async function boot() {
+      try {
+        const restored = await loadInitialProject();
+        if (!active) return;
+        setProject(restored.project);
+        setDesignCanvas(readDesignCanvas(restored.project));
+        setPieces(restored.pieces);
+        setTextures(restored.textures);
+        setSelectedPieceId(restored.pieces[0]?.id ?? "");
+        localStorage.setItem(LAST_PROJECT_KEY, restored.project.id);
+        setNotice(restored.created ? "项目已创建，先上传透明 PNG/WebP 裁片模板或白底排版原图。" : "已恢复最近的裁片项目。");
+      } catch (error) {
+        if (active) setNotice(readError(error));
+      }
+    }
+    void boot();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -241,17 +261,31 @@ export function StudioPage() {
     const piece = pieces.find((item) => item.id === pieceId);
     if (!piece) return;
     const next = { ...piece.transform, ...transform };
+    const previous = pieces;
     setPieces((current) => current.map((item) => (item.id === piece.id ? { ...item, transform: next } : item)));
-    const saved = await api.updatePiece(project.id, piece.id, next);
-    setPieces((current) => current.map((piece) => (piece.id === saved.id ? saved : piece)));
+    try {
+      const saved = await api.updatePiece(project.id, piece.id, next);
+      setPieces((current) => current.map((piece) => (piece.id === saved.id ? saved : piece)));
+    } catch (error) {
+      setPieces(previous);
+      setNotice(readError(error));
+    }
   }
 
   async function saveDesignCanvas(next: DesignCanvas, dirty = true) {
     if (!project) return;
+    const previous = designCanvas;
+    const previousDirty = layersDirty;
     setDesignCanvas(next);
     setLayersDirty(dirty);
-    const saved = await api.updateDesignCanvas(project.id, next);
-    setDesignCanvas(saved.design_canvas);
+    try {
+      const saved = await api.updateDesignCanvas(project.id, next);
+      setDesignCanvas(saved.design_canvas);
+    } catch (error) {
+      setDesignCanvas(previous);
+      setLayersDirty(previousDirty);
+      setNotice(readError(error));
+    }
   }
 
   async function addImageLayer() {
@@ -336,6 +370,53 @@ export function StudioPage() {
     setTextures(next);
   }
 
+  async function openTemplateDialog() {
+    const sets = await api.listTemplateSets();
+    setTemplateSets(sets);
+    setShowTemplateDialog(true);
+    if (sets[0]) {
+      setSelectedSetId(sets[0].id);
+      const sizes = await api.listTemplateSetSizes(sets[0].id);
+      setSelectedSetSizes(sizes);
+    }
+  }
+
+  async function onSelectTemplateSet(setId: string) {
+    setSelectedSetId(setId);
+    const sizes = await api.listTemplateSetSizes(setId);
+    setSelectedSetSizes(sizes);
+  }
+
+  async function createFromTemplateSet() {
+    const size = selectedSetSizes.find((s) => s.size_name);
+    if (!selectedSetId || !size) {
+      setNotice("请选择套装和尺寸");
+      return;
+    }
+    try {
+      setNotice("正在从模板套装创建项目...");
+      const created = await api.createProjectFromTemplateSet(selectedSetId, size.size_name, copyDesignFromBase);
+      setProject(created);
+      setDesignCanvas(readDesignCanvas(created));
+      setNotice(`项目已创建：${created.name}`);
+      setShowTemplateDialog(false);
+      // 加载项目数据
+      const [projectPieces, projectTextures, projectAssets] = await Promise.all([
+        api.listPieces(created.id),
+        api.listTextures(created.id),
+        Promise.resolve([] as Asset[]), // assets 列表 API 当前未暴露，暂空
+      ]);
+      setPieces(projectPieces);
+      setTextures(projectTextures);
+      setSelectedPieceId(projectPieces[0]?.id || "");
+      if (created.export_config?.design_canvas) {
+        setDesignCanvas(created.export_config.design_canvas as DesignCanvas);
+      }
+    } catch (err) {
+      setNotice(String(err instanceof Error ? err.message : "创建失败"));
+    }
+  }
+
   return (
     <main className="min-h-screen bg-mist p-4 text-ink">
       <header className="mb-4 grid grid-cols-[1fr_auto] items-center gap-4 rounded-lg border border-line bg-white px-5 py-4 shadow-panel max-[980px]:grid-cols-1">
@@ -345,6 +426,9 @@ export function StudioPage() {
           <p className="m-0 mt-2 text-sm text-slate-500">{notice}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button className="rounded-lg bg-white px-4 py-2 font-semibold text-ink ring-1 ring-line" onClick={openTemplateDialog}>
+            从模板套装创建
+          </button>
           <button className="rounded-lg bg-action px-4 py-2 font-semibold text-white" onClick={exportPack}>
             导出打样包
           </button>
@@ -701,40 +785,67 @@ export function StudioPage() {
         />
       </div>
       <ToastNotice notice={notice} job={job} />
+
+      {showTemplateDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg border border-line bg-white p-5 shadow-panel">
+            <h2 className="mb-4 text-lg font-bold">从模板套装创建项目</h2>
+            <div className="mb-3">
+              <label className="mb-1 block text-sm font-semibold">选择套装</label>
+              <select
+                className="w-full rounded-lg border border-line bg-white px-3 py-2"
+                value={selectedSetId}
+                onChange={(e) => onSelectTemplateSet(e.target.value)}
+              >
+                {templateSets.map((set) => (
+                  <option key={set.id} value={set.id}>
+                    {set.name} {set.version_label ? `(${set.version_label})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="mb-3">
+              <label className="mb-1 block text-sm font-semibold">选择尺寸</label>
+              <select
+                className="w-full rounded-lg border border-line bg-white px-3 py-2"
+                value={selectedSetSizes.find((s) => s.is_base)?.size_name || ""}
+                onChange={(e) => {
+                  const size = selectedSetSizes.find((s) => s.size_name === e.target.value);
+                  if (size) {
+                    setSelectedSetSizes((prev) =>
+                      prev.map((s) => ({ ...s, is_base: s.size_name === size.size_name }))
+                    );
+                    setCopyDesignFromBase(!size.is_base);
+                  }
+                }}
+              >
+                {selectedSetSizes.map((size) => (
+                  <option key={size.id} value={size.size_name}>
+                    {size.size_name} {size.is_base ? "(基准)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="mb-4 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={copyDesignFromBase}
+                onChange={(e) => setCopyDesignFromBase(e.target.checked)}
+              />
+              继承基准设计参数（按宽度比例自动缩放）
+            </label>
+            <div className="flex justify-end gap-2">
+              <button className="rounded-lg bg-white px-4 py-2 font-semibold ring-1 ring-line" onClick={() => setShowTemplateDialog(false)}>
+                取消
+              </button>
+              <button className="rounded-lg bg-action px-4 py-2 font-semibold text-white" onClick={createFromTemplateSet}>
+                创建项目
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
-  );
-}
-
-function ToastNotice({ notice, job }: { notice: string; job: Job | null }) {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (!notice) {
-      setVisible(false);
-      return;
-    }
-    setVisible(true);
-    if (job?.status === "succeeded") {
-      const timer = setTimeout(() => setVisible(false), 30000);
-      return () => clearTimeout(timer);
-    }
-  }, [notice, job?.status, job?.job_type]);
-
-  if (!visible || !notice) return null;
-  return (
-    <div className="fixed bottom-6 right-6 z-50 flex max-w-sm items-start gap-3 rounded-lg border border-line bg-white px-4 py-3 text-sm shadow-panel">
-      <span className="mt-0.5 leading-5">{notice}</span>
-      <button
-        className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-        onClick={() => setVisible(false)}
-        aria-label="关闭提示"
-      >
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 6 6 18" />
-          <path d="M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
   );
 }
 
@@ -751,6 +862,33 @@ function readAnalysisReason(analysis: Record<string, unknown>) {
 function readDesignCanvas(project: Project): DesignCanvas | null {
   const canvas = (project.export_config as { design_canvas?: DesignCanvas }).design_canvas;
   return canvas || null;
+}
+
+async function loadInitialProject(): Promise<{ project: Project; pieces: Piece[]; textures: Texture[]; created: boolean }> {
+  const storedProjectId = localStorage.getItem(LAST_PROJECT_KEY);
+  if (storedProjectId) {
+    try {
+      return { ...(await readProjectWorkspace(storedProjectId)), created: false };
+    } catch {
+      localStorage.removeItem(LAST_PROJECT_KEY);
+    }
+  }
+  const projects = await api.listProjects();
+  const latest = projects[0];
+  if (latest) {
+    return { ...(await readProjectWorkspace(latest.id)), created: false };
+  }
+  const project = await api.createProject();
+  return { project, pieces: [], textures: [], created: true };
+}
+
+async function readProjectWorkspace(projectId: string): Promise<{ project: Project; pieces: Piece[]; textures: Texture[] }> {
+  const project = await api.getProject(projectId);
+  const [pieces, textures] = await Promise.all([
+    api.listPieces(projectId).catch(() => [] as Piece[]),
+    api.listTextures(projectId).catch(() => [] as Texture[])
+  ]);
+  return { project, pieces, textures };
 }
 
 function createLayer(type: "image" | "text", designCanvas: DesignCanvas, asset?: Asset): DesignLayer {
@@ -798,193 +936,4 @@ function createLayer(type: "image" | "text", designCanvas: DesignCanvas, asset?:
     stroke: "#111111",
     stroke_width: 6
   };
-}
-
-function LayerEditor({
-  layer,
-  pieces,
-  onChange,
-  onDelete
-}: {
-  layer: DesignLayer;
-  pieces: Piece[];
-  onChange: (update: Partial<DesignLayer>) => void;
-  onDelete: () => void;
-}) {
-  const roles = Array.from(new Set(pieces.map((piece) => piece.transform.piece_role).filter(Boolean))) as string[];
-  return (
-    <div className="grid gap-3 rounded-lg border border-line p-3">
-      <label className="grid gap-1 text-sm font-semibold">
-        <span>图层名称</span>
-        <input className="rounded-lg border border-line px-3 py-2" value={layer.name} onChange={(event) => onChange({ name: event.target.value })} />
-      </label>
-      {layer.type === "text" && (
-        <label className="grid gap-1 text-sm font-semibold">
-          <span>文字内容</span>
-          <input className="rounded-lg border border-line px-3 py-2" value={layer.content || ""} onChange={(event) => onChange({ content: event.target.value })} />
-        </label>
-      )}
-      <div className="grid grid-cols-2 gap-2">
-        <NumberField label="X" value={layer.x} onChange={(x) => onChange({ x })} />
-        <NumberField label="Y" value={layer.y} onChange={(y) => onChange({ y })} />
-        <NumberField label="宽" value={layer.width} onChange={(width) => onChange({ width })} />
-        <NumberField label="高" value={layer.height} onChange={(height) => onChange({ height })} />
-        <NumberField label="旋转" value={layer.rotation} onChange={(rotation) => onChange({ rotation })} />
-        <NumberField label="透明度" value={layer.opacity} step={0.05} onChange={(opacity) => onChange({ opacity })} />
-      </div>
-      {layer.type === "text" && (
-        <div className="grid grid-cols-2 gap-2">
-          <NumberField label="字号" value={layer.font_size || 120} onChange={(font_size) => onChange({ font_size })} />
-          <NumberField label="描边" value={layer.stroke_width || 0} onChange={(stroke_width) => onChange({ stroke_width })} />
-          <label className="grid gap-1 text-xs font-semibold">
-            <span>填充色</span>
-            <input className="h-10 rounded-lg border border-line px-2" value={layer.fill || "#ffffff"} onChange={(event) => onChange({ fill: event.target.value })} />
-          </label>
-          <label className="grid gap-1 text-xs font-semibold">
-            <span>描边色</span>
-            <input className="h-10 rounded-lg border border-line px-2" value={layer.stroke || "#111111"} onChange={(event) => onChange({ stroke: event.target.value })} />
-          </label>
-        </div>
-      )}
-      <label className="grid gap-1 text-sm font-semibold">
-        <span>目标部位</span>
-        <select
-          className="rounded-lg border border-line bg-white px-3 py-2"
-          value={layer.target_roles[0] || ""}
-          onChange={(event) => onChange({ target_roles: event.target.value ? [event.target.value] : [] })}
-        >
-          <option value="">自动匹配</option>
-          {roles.map((role) => (
-            <option key={role} value={role}>{PIECE_ROLE_LABELS[role] || role}</option>
-          ))}
-        </select>
-      </label>
-      <div className="grid grid-cols-2 gap-2 text-sm">
-        <label className="rounded-lg border border-line p-2">
-          <input type="checkbox" checked={layer.visible} onChange={(event) => onChange({ visible: event.target.checked })} /> 显示
-        </label>
-        <label className="rounded-lg border border-line p-2">
-          <input type="checkbox" checked={layer.locked} onChange={(event) => onChange({ locked: event.target.checked })} /> 锁定
-        </label>
-      </div>
-      <button className="rounded-lg bg-white px-3 py-2 font-semibold text-coral ring-1 ring-line" onClick={onDelete}>
-        删除图层
-      </button>
-    </div>
-  );
-}
-
-function NumberField({ label, value, step = 1, onChange }: { label: string; value: number; step?: number; onChange: (value: number) => void }) {
-  return (
-    <label className="grid gap-1 text-xs font-semibold">
-      <span>{label}</span>
-      <input className="rounded-lg border border-line px-2 py-2" type="number" step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
-    </label>
-  );
-}
-
-function SafetyReportList({ report }: { report: SafetyReportItem[] }) {
-  if (report.length === 0) {
-    return <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">暂无安全区风险。图层更新后会自动刷新检查结果。</p>;
-  }
-  return (
-    <div className="grid gap-2">
-      {report.map((item, index) => (
-        <div key={`${item.layer_id}-${index}`} className={`rounded-lg p-3 text-xs leading-5 ${item.level === "ok" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>
-          <strong>{item.layer_name}</strong>：{item.message}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
-      <h2 className="m-0 mb-3 text-lg font-semibold">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function SinglePieceLoading() {
-  return (
-    <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
-      <h2 className="m-0 text-lg font-semibold">单裁片校正</h2>
-      <p className="m-0 mt-1 text-sm text-slate-500">画布组件加载中...</p>
-      <div className="checkerboard mt-3 flex h-[640px] items-center justify-center rounded-lg border border-line text-sm text-slate-500">
-        正在准备裁片画布
-      </div>
-    </section>
-  );
-}
-
-function LayoutPreviewLoading() {
-  return (
-    <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
-      <h2 className="m-0 text-lg font-semibold">整套排版</h2>
-      <p className="m-0 mt-1 text-sm text-slate-500">画布组件加载中...</p>
-      <div className="checkerboard mt-3 flex h-[640px] items-center justify-center rounded-lg border border-line text-sm text-slate-500">
-        正在准备排版画布
-      </div>
-    </section>
-  );
-}
-
-function FileField({
-  label,
-  accept,
-  selectedName,
-  onFile
-}: {
-  label: string;
-  accept: string;
-  selectedName?: string;
-  onFile: (file: File) => void;
-}) {
-  return (
-    <label className="mt-3 grid gap-2 text-sm font-semibold">
-      {label}
-      <input
-        className="w-full rounded-lg border border-line bg-white px-3 py-2 text-sm"
-        type="file"
-        accept={accept}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) onFile(file);
-          event.currentTarget.value = "";
-        }}
-      />
-      <span className="min-h-5 break-all text-xs font-normal text-slate-500">{selectedName ? `已选择：${selectedName}` : "未选择文件"}</span>
-    </label>
-  );
-}
-
-function Range({
-  label,
-  description,
-  value,
-  min,
-  max,
-  step = 1,
-  onChange
-}: {
-  label: string;
-  description?: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="grid gap-2 text-sm font-semibold">
-      <span className="flex justify-between">
-        {label}
-        <strong>{Number(value).toFixed(step < 1 ? 2 : 0)}</strong>
-      </span>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
-      {description && <span className="text-xs font-normal leading-5 text-slate-500">{description}</span>}
-    </label>
-  );
 }

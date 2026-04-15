@@ -101,6 +101,7 @@ def test_render_layout_with_texture(tmp_path: Path) -> None:
 
     assert out.exists()
     assert Image.open(out).size == (120, 100)
+    assert not list(tmp_path.glob("_*.png"))
 
 
 def test_render_piece_from_design_canvas_samples_shared_region(tmp_path: Path) -> None:

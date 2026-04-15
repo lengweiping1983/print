@@ -5,18 +5,25 @@ import { PIECE_ROLE_LABELS } from "@/lib/labels";
 import "konva/lib/shapes/Image.js";
 import "konva/lib/shapes/Rect.js";
 import "konva/lib/shapes/Text.js";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva/es/ReactKonvaCore.js";
 
 const loadedImageCache = new Map<string, Promise<HTMLImageElement | null>>();
+const loadedImageValueCache = new Map<string, HTMLImageElement | null>();
 const luminanceMaskCache = new Map<string, HTMLCanvasElement>();
 const outlineMaskCache = new Map<string, HTMLCanvasElement>();
 
 function useLoadedImage(src: string, fallbackSrc = "") {
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const cacheKey = imageCacheKey(src, fallbackSrc);
+  const [image, setImage] = useState<HTMLImageElement | null>(() => loadedImageValueCache.get(cacheKey) ?? null);
   useEffect(() => {
     if (!src) {
       setImage(null);
+      return;
+    }
+    const cachedValue = loadedImageValueCache.get(cacheKey);
+    if (cachedValue !== undefined) {
+      setImage(cachedValue);
       return;
     }
     let active = true;
@@ -26,18 +33,31 @@ function useLoadedImage(src: string, fallbackSrc = "") {
     return () => {
       active = false;
     };
-  }, [src, fallbackSrc]);
+  }, [src, fallbackSrc, cacheKey]);
   return image;
 }
 
+function imageCacheKey(src: string, fallbackSrc = "") {
+  return `${src}::${fallbackSrc}`;
+}
+
 function loadCachedImage(src: string, fallbackSrc = "") {
-  const cacheKey = `${src}::${fallbackSrc}`;
+  const cacheKey = imageCacheKey(src, fallbackSrc);
+  if (loadedImageValueCache.has(cacheKey)) {
+    return Promise.resolve(loadedImageValueCache.get(cacheKey) ?? null);
+  }
   const cached = loadedImageCache.get(cacheKey);
   if (cached) return cached;
 
   const promise = loadImage(src).then((image) => {
-    if (image || !fallbackSrc || fallbackSrc === src) return image;
-    return loadImage(fallbackSrc);
+    if (image || !fallbackSrc || fallbackSrc === src) {
+      loadedImageValueCache.set(cacheKey, image);
+      return image;
+    }
+    return loadImage(fallbackSrc).then((fallback) => {
+      loadedImageValueCache.set(cacheKey, fallback);
+      return fallback;
+    });
   });
   loadedImageCache.set(cacheKey, promise);
   return promise;
@@ -53,8 +73,25 @@ function loadImage(src: string) {
   });
 }
 
+function useElementSize<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const rect = entry.contentRect;
+      setSize({ width: rect.width, height: rect.height });
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, size] as const;
+}
+
 function useLuminanceMaskImage(image: HTMLImageElement | null, cacheKey = "") {
-  const [mask, setMask] = useState<HTMLCanvasElement | null>(null);
+  const imageKey = cacheKey || image?.currentSrc || image?.src || "";
+  const [mask, setMask] = useState<HTMLCanvasElement | null>(() => (imageKey ? luminanceMaskCache.get(imageKey) ?? null : null));
 
   useEffect(() => {
     if (!image) {
@@ -98,7 +135,8 @@ function useLuminanceMaskImage(image: HTMLImageElement | null, cacheKey = "") {
 }
 
 function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1, enabled = true, cacheKey = "") {
-  const [outline, setOutline] = useState<HTMLCanvasElement | null>(null);
+  const outlineKey = mask && enabled ? `${cacheKey || `${mask.width}x${mask.height}`}:${strokeWidth}` : "";
+  const [outline, setOutline] = useState<HTMLCanvasElement | null>(() => (outlineKey ? outlineMaskCache.get(outlineKey) ?? null : null));
 
   useEffect(() => {
     if (!mask || !enabled) {
@@ -213,15 +251,22 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
   const maskImage = useLoadedImage(selected?.mask_url || "");
   const selectedMaskKey = selected?.mask_url || "";
   const alphaMaskImage = useLuminanceMaskImage(maskImage, selectedMaskKey);
-  const selectedOutlineImage = useMaskOutlineImage(alphaMaskImage, outlineWidth, showOutlines, selectedMaskKey);
   const [pieceZoom, setPieceZoom] = useState(1);
+  const [stageWrapRef, stageWrapSize] = useElementSize<HTMLDivElement>();
+  const stageWidth = Math.max(320, Math.round(stageWrapSize.width || 520));
+  const stageHeight = Math.max(440, Math.min(640, Math.round(stageWidth * 1.22)));
   const selectedMaskFrame = useMemo(() => {
     if (!selected) return null;
-    const scale = Math.min(440 / Math.max(1, selected.width), 520 / Math.max(1, selected.height));
+    const innerWidth = Math.max(1, stageWidth - 80);
+    const innerHeight = Math.max(1, stageHeight - 80);
+    const scale = Math.min(innerWidth / Math.max(1, selected.width), innerHeight / Math.max(1, selected.height));
     const width = Math.max(1, selected.width * scale);
     const height = Math.max(1, selected.height * scale);
-    return { x: (520 - width) / 2, y: (640 - height) / 2, width, height };
-  }, [selected]);
+    return { x: (stageWidth - width) / 2, y: (stageHeight - height) / 2, width, height };
+  }, [selected, stageHeight, stageWidth]);
+  const selectedMaskScale = selectedMaskFrame && selected ? selectedMaskFrame.width / Math.max(1, selected.width) : 1;
+  const selectedOutlineSourceWidth = Math.max(1, outlineWidth / Math.max(0.1, selectedMaskScale * pieceZoom));
+  const selectedOutlineImage = useMaskOutlineImage(alphaMaskImage, selectedOutlineSourceWidth, showOutlines, `${selectedMaskKey}:${selectedOutlineSourceWidth.toFixed(2)}`);
 
   return (
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
@@ -254,12 +299,12 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
           <ZoomButton label="+" onClick={() => setPieceZoom((zoom) => clampZoom(zoom + 0.1))} />
         </div>
       </div>
-      <div className="overflow-hidden rounded-lg border border-line bg-white">
-        <Stage width={520} height={640}>
+      <div ref={stageWrapRef} className="overflow-hidden rounded-lg border border-line bg-white">
+        <Stage width={stageWidth} height={stageHeight}>
           <Layer>
-            <Rect x={0} y={0} width={520} height={640} fill="#ffffff" />
-            {!selected && <Text x={160} y={300} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
-            {selected && !textureImage && <Text x={145} y={300} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
+            <Rect x={0} y={0} width={stageWidth} height={stageHeight} fill="#ffffff" />
+            {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
+            {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
           </Layer>
           {textureImage && selected && alphaMaskImage && selectedMaskFrame && (
             <ClippedTextureLayer
@@ -323,6 +368,7 @@ export function LayoutPreview({
   const textureImage = useLoadedImage(textureUrl, fallbackTextureUrl);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
   const [previewMode, setPreviewMode] = useState<"layout" | "design">("layout");
+  const [previewWrapRef, previewWrapSize] = useElementSize<HTMLDivElement>();
   const bounds = useMemo(() => {
     if (previewMode === "design") {
       return {
@@ -335,11 +381,11 @@ export function LayoutPreview({
     return { width, height };
   }, [pieces, previewMode, textureImage, designCanvas]);
   const fitZoom = useMemo(() => {
-    const maxWidth = 980;
-    const maxHeight = 720;
+    const maxWidth = Math.max(360, previewWrapSize.width || 980);
+    const maxHeight = Math.max(360, Math.min(720, previewWrapSize.height || 720));
     const next = Math.min(maxWidth / bounds.width, maxHeight / bounds.height, 1);
     return Math.max(0.05, Number(next.toFixed(2)));
-  }, [bounds]);
+  }, [bounds, previewWrapSize.height, previewWrapSize.width]);
 
   useEffect(() => {
     setLayoutZoom(fitZoom);
@@ -364,7 +410,7 @@ export function LayoutPreview({
           <ZoomButton label="100%" onClick={() => setLayoutZoom(1)} />
         </div>
       </div>
-      <div className="flex max-h-[760px] justify-center overflow-auto rounded-lg border border-line bg-white">
+      <div ref={previewWrapRef} className="flex max-h-[760px] min-h-[360px] justify-center overflow-auto rounded-lg border border-line bg-white">
         <Stage width={Math.ceil(bounds.width * layoutZoom)} height={Math.ceil(bounds.height * layoutZoom)}>
           <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
             <Rect x={0} y={0} width={bounds.width} height={bounds.height} fill="#ffffff" />

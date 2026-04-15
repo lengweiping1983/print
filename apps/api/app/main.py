@@ -16,6 +16,8 @@ from .design_ops import build_design_texture_canvas, build_fit_preview, build_sa
 from .image_ops import (
     extract_alpha_components,
     has_transparent_alpha,
+    ensure_dimensions_within_limit,
+    ensure_image_within_limit,
     image_size,
     make_layout_template,
     make_mirror_tile,
@@ -27,7 +29,7 @@ from .image_ops import (
     write_piece_marker_masks,
 )
 from .jobs import create_job, update_job_progress
-from .layout_ops import auto_map_pieces, build_design_canvas_config, merge_mapping_into_transform
+from .layout_ops import ROLE_LABELS, auto_map_pieces, build_design_canvas_config, merge_mapping_into_transform
 from .providers import get_provider
 from .schemas import (
     AssetOut,
@@ -39,11 +41,20 @@ from .schemas import (
     PieceOut,
     PieceTransform,
     ProjectCreate,
+    ProjectFromTemplateRequest,
     ProjectOut,
     SeamlessRequest,
+    SetPieceDefOut,
+    SetPieceDefPatch,
+    SizeTemplateOut,
+    SizeTemplatePieceOut,
+    SizeTemplatePiecePatch,
+    TemplateSetCreate,
+    TemplateSetOut,
     TextureGenerateRequest,
     TextureOut,
 )
+from .template_ops import match_pieces_to_base, pick_default_base_size, size_sort_key
 from .texture_analysis import analyze_texture_fit_source
 
 
@@ -124,7 +135,13 @@ async def upload_asset(
         while chunk := await file.read(1024 * 1024):
             sha.update(chunk)
             fh.write(chunk)
-    width, height = safe_image_size(dst)
+    try:
+        width, height = ensure_image_within_limit(dst)
+    except ValueError as exc:
+        dst.unlink(missing_ok=True)
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except Exception:
+        width, height = 0, 0
     created = now_iso()
     with connect() as con:
         con.execute(
@@ -153,6 +170,7 @@ def _import_template_job(job_id: str, payload: dict) -> dict:
     asset_id = payload["asset_id"]
     asset = get_asset_row(asset_id, project_id)
     source_path = storage_path(asset["path"])
+    ensure_image_within_limit(source_path)
     update_job_progress(job_id, 0.12)
     template_source = "alpha" if has_transparent_alpha(source_path) else "layout_image"
     templates_dir = project_dir(project_id) / "templates"
@@ -177,7 +195,7 @@ def _import_template_job(job_id: str, payload: dict) -> dict:
     for old in [*pieces_dir.glob("*_mask.png"), *pieces_dir.glob("*_markers.png")]:
         old.unlink()
     update_job_progress(job_id, 0.52)
-    pieces = extract_alpha_components(template_path, pieces_dir)
+    pieces = extract_alpha_components(template_path, pieces_dir, min_area=20)
     update_job_progress(job_id, 0.72)
     red_marker_count = write_piece_marker_masks(pieces, red_marker_path)
     asset_metadata["red_marker_count"] = red_marker_count
@@ -270,6 +288,7 @@ def auto_map_layout(project_id: str, payload: AutoMapRequest) -> dict:
 @app.post("/api/projects/{project_id}/textures/generate")
 def generate_texture(project_id: str, payload: TextureGenerateRequest) -> dict:
     ensure_project(project_id)
+    ensure_job_dimensions(payload.tile_width, payload.tile_height)
     job_id = create_job(project_id, "texture_generate", payload.model_dump(), _generate_texture_job)
     return {"job_id": job_id}
 
@@ -277,6 +296,7 @@ def generate_texture(project_id: str, payload: TextureGenerateRequest) -> dict:
 @app.post("/api/projects/{project_id}/textures/{texture_id}/seamless")
 def create_seamless(project_id: str, texture_id: str, payload: SeamlessRequest) -> dict:
     ensure_project(project_id)
+    ensure_job_dimensions(payload.width, payload.height)
     job_id = create_job(
         project_id,
         "texture_seamless",
@@ -344,6 +364,618 @@ def get_job(job_id: str) -> dict:
     return data
 
 
+# ---------------------------------------------------------------------------
+# Template Set APIs
+# ---------------------------------------------------------------------------
+
+@app.post("/api/template-sets", response_model=TemplateSetOut)
+def create_template_set(payload: TemplateSetCreate) -> dict:
+    set_id = f"set_{uuid.uuid4().hex[:10]}"
+    template_set_dir(set_id).mkdir(parents=True, exist_ok=True)
+    created = now_iso()
+    with connect() as con:
+        con.execute(
+            """
+            insert into template_sets(id, name, garment_type, version_label, description, base_size_template_id, design_canvas, created_at, updated_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (set_id, payload.name, payload.garment_type, payload.version_label, payload.description, "", "{}", created, created),
+        )
+    return get_template_set_row(set_id)
+
+
+@app.get("/api/template-sets", response_model=list[TemplateSetOut])
+def list_template_sets() -> list[dict]:
+    with connect() as con:
+        rows = con.execute("select * from template_sets order by created_at desc").fetchall()
+    return [_template_set_out(row_to_dict(row)) for row in rows]
+
+
+@app.get("/api/template-sets/{set_id}", response_model=TemplateSetOut)
+def get_template_set(set_id: str) -> dict:
+    return get_template_set_row(set_id)
+
+
+@app.patch("/api/template-sets/{set_id}", response_model=TemplateSetOut)
+def patch_template_set(set_id: str, payload: TemplateSetCreate) -> dict:
+    ensure_template_set(set_id)
+    with connect() as con:
+        con.execute(
+            "update template_sets set name = ?, garment_type = ?, version_label = ?, description = ?, updated_at = ? where id = ?",
+            (payload.name, payload.garment_type, payload.version_label, payload.description, now_iso(), set_id),
+        )
+    return get_template_set_row(set_id)
+
+
+@app.post("/api/template-sets/{set_id}/base-size")
+def set_base_size(set_id: str, size_template_id: str = Form(...)) -> dict:
+    ensure_template_set(set_id)
+    ensure_size_template(size_template_id, set_id)
+    with connect() as con:
+        con.execute("update size_templates set is_base = false where set_id = ?", (set_id,))
+        con.execute("update size_templates set is_base = true where id = ? and set_id = ?", (size_template_id, set_id))
+        con.execute(
+            "update template_sets set base_size_template_id = ?, updated_at = ? where id = ?",
+            (size_template_id, now_iso(), set_id),
+        )
+    return get_template_set_row(set_id)
+
+
+@app.post("/api/template-sets/{set_id}/assets", response_model=AssetOut)
+async def upload_template_set_asset(
+    set_id: str,
+    file: UploadFile = File(...),
+) -> dict:
+    ensure_template_set(set_id)
+    asset_id = f"ast_{uuid.uuid4().hex[:12]}"
+    suffix = Path(file.filename or "asset.bin").suffix.lower() or ".bin"
+    asset_dir = template_set_dir(set_id) / "assets"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    dst = asset_dir / f"{asset_id}{suffix}"
+    sha = hashlib.sha256()
+    with dst.open("wb") as fh:
+        while chunk := await file.read(1024 * 1024):
+            sha.update(chunk)
+            fh.write(chunk)
+    width, height = safe_image_size(dst)
+    created = now_iso()
+    with connect() as con:
+        con.execute(
+            """
+            insert into assets(id, project_id, kind, filename, path, width, height, sha256, metadata, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
+            """,
+            (asset_id, "", "template_set", file.filename or dst.name, rel_path(dst), width, height, sha.hexdigest(), created),
+        )
+    return get_asset_dict(asset_id)
+
+
+@app.post("/api/template-sets/{set_id}/sizes/import")
+def import_template_set_size(set_id: str, asset_id: str = Form(...), size_name: str = Form(...)) -> dict:
+    ensure_template_set(set_id)
+    asset = get_asset_row(asset_id, "")
+    ext = Path(asset["filename"]).suffix.lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(status_code=400, detail="请上传 PNG/WebP 透明裁片模板，或白底排版原图 JPG/PNG/WebP。")
+
+    source_path = storage_path(asset["path"])
+    template_source = "alpha" if has_transparent_alpha(source_path) else "layout_image"
+    size_id = f"sz_{uuid.uuid4().hex[:8]}"
+    sizes_dir = template_set_dir(set_id) / "sizes" / size_id
+    sizes_dir.mkdir(parents=True, exist_ok=True)
+
+    if template_source == "alpha":
+        template_path = source_path
+    else:
+        template_path = sizes_dir / "template.png"
+        make_layout_template(source_path, template_path)
+
+    red_marker_path = make_red_marker_mask(source_path, sizes_dir / "red_markers.png")
+    pieces_dir = sizes_dir / "pieces"
+    pieces = extract_alpha_components(template_path, pieces_dir)
+    red_marker_count = write_piece_marker_masks(pieces, red_marker_path)
+
+    width, height = safe_image_size(template_path)
+    created = now_iso()
+
+    with connect() as con:
+        # 检查是否已有基准
+        base_row = con.execute(
+            "select id from size_templates where set_id = ? and is_base = true limit 1", (set_id,)
+        ).fetchone()
+        has_base = bool(base_row)
+        is_base = not has_base
+
+        con.execute(
+            """
+            insert into size_templates(
+              id, set_id, size_name, asset_id, template_source, template_path,
+              red_marker_path, red_marker_count, width, height, pieces_count, is_base, created_at, updated_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                size_id, set_id, size_name, asset_id, template_source, rel_path(template_path),
+                rel_path(red_marker_path) if red_marker_path else "",
+                red_marker_count, width, height, len(pieces), is_base, created, created,
+            ),
+        )
+
+        if is_base:
+            con.execute(
+                "update template_sets set base_size_template_id = ?, updated_at = ? where id = ?",
+                (size_id, now_iso(), set_id),
+            )
+            # 首次导入：创建 piece_defs 和 size_template_pieces
+            stored_pieces: list[dict] = []
+            for index, piece in enumerate(pieces, start=1):
+                piece_id = f"pc_{index:02d}_{uuid.uuid4().hex[:6]}"
+                stored_pieces.append({
+                    **piece,
+                    "id": piece_id,
+                    "mask_path": str(piece["mask_path"]),
+                })
+            design_canvas = build_design_canvas_config(stored_pieces, {"garment_type": "unknown"})
+            con.execute(
+                "update template_sets set design_canvas = ?, updated_at = ? where id = ?",
+                (dumps(design_canvas), now_iso(), set_id),
+            )
+            mappings = auto_map_pieces(stored_pieces, design_canvas, "unknown")
+            mapping_by_id = {m["id"]: m for m in mappings}
+
+            for index, piece in enumerate(stored_pieces, start=1):
+                mapping = mapping_by_id.get(piece["id"], {})
+                def_id = f"def_{index:02d}_{uuid.uuid4().hex[:6]}"
+                piece_role = mapping.get("piece_role", "unknown")
+                name = f"{ROLE_LABELS.get(piece_role, '裁片')} {index:02d}"
+                base_transform = merge_mapping_into_transform(PieceTransform().model_dump(), mapping)
+                con.execute(
+                    """
+                    insert into set_piece_defs(id, set_id, piece_role, name, sort_order, base_transform, created_at, updated_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (def_id, set_id, piece_role, name, index, dumps(base_transform), created, created),
+                )
+                con.execute(
+                    """
+                    insert into size_template_pieces(
+                      id, size_template_id, piece_def_id, mask_path, polygon, bbox,
+                      source_x, source_y, width, height, area, centroid_x, centroid_y, scale_to_base, created_at, updated_at
+                    )
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        piece["id"], size_id, def_id, rel_path(Path(piece["mask_path"])), dumps(piece["polygon"]),
+                        dumps(piece["bbox"]), piece["source_x"], piece["source_y"],
+                        piece["width"], piece["height"], piece["area"],
+                        piece["centroid_x"], piece["centroid_y"], 1.0, created, created,
+                    ),
+                )
+        else:
+            # 已有基准：匹配到基准 piece_defs
+            base_size_id = base_row["id"]
+            base_defs = list_set_piece_defs(set_id)
+            base_geos = raw_size_template_geos(base_size_id)
+            # 给 base_geos 补充 piece_def_id
+            for bg in base_geos:
+                for d in base_defs:
+                    if d["id"] == bg.get("piece_def_id"):
+                        bg["piece_def_id"] = d["id"]
+                        break
+
+            matches = match_pieces_to_base(pieces, base_geos)
+            match_by_index = {m["new_piece_index"]: m for m in matches}
+
+            for index, piece in enumerate(pieces, start=1):
+                match = match_by_index.get(index - 1, {})
+                piece_id = f"pc_{index:02d}_{uuid.uuid4().hex[:6]}"
+                con.execute(
+                    """
+                    insert into size_template_pieces(
+                      id, size_template_id, piece_def_id, mask_path, polygon, bbox,
+                      source_x, source_y, width, height, area, centroid_x, centroid_y, scale_to_base, created_at, updated_at
+                    )
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        piece_id, size_id, match.get("piece_def_id", ""), rel_path(piece["mask_path"]),
+                        dumps(piece["polygon"]), dumps(piece["bbox"]),
+                        piece["source_x"], piece["source_y"], piece["width"], piece["height"],
+                        piece["area"], piece["centroid_x"], piece["centroid_y"],
+                        match.get("scale_to_base", 1.0), created, created,
+                    ),
+                )
+
+    warnings: list[str] = []
+    if has_base:
+        base_geo_count = len(base_geos)
+        if len(pieces) != base_geo_count:
+            warnings.append(f"裁片数量与基准不一致：基准 {base_geo_count} 个，当前 {len(pieces)} 个。")
+        unmatched = len(pieces) - len(matches)
+        if unmatched > 0:
+            warnings.append(f"有 {unmatched} 个裁片未能自动匹配到基准类型，请在配置页手动关联。")
+
+    return {
+        "size_template": _size_template_out(get_size_template_row(size_id)),
+        "pieces": list_size_template_pieces(size_id),
+        "warnings": warnings,
+    }
+
+
+@app.get("/api/template-sets/{set_id}/piece-defs", response_model=list[SetPieceDefOut])
+def get_piece_defs(set_id: str) -> list[dict]:
+    ensure_template_set(set_id)
+    return list_set_piece_defs(set_id)
+
+
+@app.patch("/api/template-sets/{set_id}/piece-defs/{def_id}", response_model=SetPieceDefOut)
+def patch_piece_def(set_id: str, def_id: str, payload: SetPieceDefPatch) -> dict:
+    ensure_template_set(set_id)
+    with connect() as con:
+        cur = con.execute(
+            "update set_piece_defs set updated_at = ? where id = ? and set_id = ?",
+            (now_iso(), def_id, set_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Piece def not found")
+        if payload.name:
+            con.execute("update set_piece_defs set name = ? where id = ?", (payload.name, def_id))
+        if payload.piece_role:
+            con.execute("update set_piece_defs set piece_role = ? where id = ?", (payload.piece_role, def_id))
+        if payload.sort_order >= 0:
+            con.execute("update set_piece_defs set sort_order = ? where id = ?", (payload.sort_order, def_id))
+        row = con.execute("select * from set_piece_defs where id = ?", (def_id,)).fetchone()
+    return _set_piece_def_out(row_to_dict(row))
+
+
+@app.get("/api/template-sets/{set_id}/sizes", response_model=list[SizeTemplateOut])
+def list_size_templates(set_id: str) -> list[dict]:
+    ensure_template_set(set_id)
+    with connect() as con:
+        rows = con.execute("select * from size_templates where set_id = ? order by created_at asc", (set_id,)).fetchall()
+    return [_size_template_out(row_to_dict(row)) for row in rows]
+
+
+@app.get("/api/template-sets/{set_id}/sizes/{size_id}/pieces", response_model=list[SizeTemplatePieceOut])
+def list_size_template_pieces_endpoint(set_id: str, size_id: str) -> list[dict]:
+    ensure_template_set(set_id)
+    ensure_size_template(size_id, set_id)
+    return list_size_template_pieces(size_id)
+
+
+@app.patch("/api/template-sets/{set_id}/sizes/{size_id}/pieces/{piece_id}", response_model=SizeTemplatePieceOut)
+def patch_size_template_piece(
+    set_id: str, size_id: str, piece_id: str, payload: SizeTemplatePiecePatch
+) -> dict:
+    ensure_template_set(set_id)
+    ensure_size_template(size_id, set_id)
+    with connect() as con:
+        # 重新计算 scale_to_base
+        new_scale = 1.0
+        if payload.piece_def_id:
+            base_size_id = con.execute(
+                "select base_size_template_id from template_sets where id = ?", (set_id,)
+            ).fetchone()["base_size_template_id"]
+            if base_size_id:
+                target_piece = con.execute(
+                    "select width from size_template_pieces where id = ? and size_template_id = ?",
+                    (piece_id, size_id),
+                ).fetchone()
+                base_piece = con.execute(
+                    "select width from size_template_pieces where piece_def_id = ? and size_template_id = ?",
+                    (payload.piece_def_id, base_size_id),
+                ).fetchone()
+                if target_piece and base_piece and base_piece["width"] > 0:
+                    new_scale = round(target_piece["width"] / base_piece["width"], 4)
+        cur = con.execute(
+            "update size_template_pieces set piece_def_id = ?, scale_to_base = ?, updated_at = ? where id = ? and size_template_id = ?",
+            (payload.piece_def_id, new_scale, now_iso(), piece_id, size_id),
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Piece not found")
+        row = con.execute(
+            """
+            select p.*, d.name as def_name, d.piece_role as def_role
+            from size_template_pieces p
+            left join set_piece_defs d on d.id = p.piece_def_id
+            where p.id = ?
+            """,
+            (piece_id,),
+        ).fetchone()
+    data = row_to_dict(row)
+    data["polygon"] = loads(data["polygon"], [])
+    data["bbox"] = loads(data["bbox"], {})
+    data["mask_url"] = file_url(data["mask_path"])
+    data["name"] = data.get("def_name") or "未命名"
+    data["piece_role"] = data.get("def_role") or "unknown"
+    return data
+
+
+@app.delete("/api/template-sets/{set_id}/sizes/{size_id}")
+def delete_size_template(set_id: str, size_id: str) -> dict:
+    ensure_template_set(set_id)
+    size_row = get_size_template_row(size_id)
+    with connect() as con:
+        con.execute("delete from size_template_pieces where size_template_id = ?", (size_id,))
+        con.execute("delete from size_templates where id = ? and set_id = ?", (size_id, set_id))
+        # 如果删除的是基准，需要重新指定基准（选剩余中最小）
+        if size_row.get("is_base"):
+            remaining = con.execute("select size_name, id from size_templates where set_id = ?", (set_id,)).fetchall()
+            if remaining:
+                new_base = min(remaining, key=lambda r: size_sort_key(r["size_name"]))
+                con.execute("update size_templates set is_base = true where id = ?", (new_base["id"],))
+                con.execute(
+                    "update template_sets set base_size_template_id = ? where id = ?",
+                    (new_base["id"], set_id),
+                )
+            else:
+                con.execute(
+                    "update template_sets set base_size_template_id = ? where id = ?",
+                    ("", set_id),
+                )
+    return {"deleted": size_id}
+
+
+@app.post("/api/projects/from-template-set", response_model=ProjectOut)
+def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dict:
+    ensure_template_set(payload.set_id)
+    with connect() as con:
+        set_row = con.execute("select * from template_sets where id = ?", (payload.set_id,)).fetchone()
+        size_row = con.execute(
+            "select * from size_templates where set_id = ? and size_name = ?",
+            (payload.set_id, payload.size_name),
+        ).fetchone()
+    if not set_row or not size_row:
+        raise HTTPException(status_code=404, detail="Template set or size not found")
+
+    project_id = f"prj_{uuid.uuid4().hex[:10]}"
+    project_dir(project_id).mkdir(parents=True, exist_ok=True)
+    created = now_iso()
+
+    size_id = size_row["id"]
+    set_data = row_to_dict(set_row)
+    size_data = row_to_dict(size_row)
+    design_canvas = loads(set_data.get("design_canvas") or "{}", {})
+
+    # 复制 asset
+    asset = get_asset_row(size_data["asset_id"], "")
+    asset_id_new = f"ast_{uuid.uuid4().hex[:12]}"
+    asset_dst = project_dir(project_id) / "assets" / f"{asset_id_new}{Path(asset['filename']).suffix.lower() or '.bin'}"
+    asset_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(storage_path(asset["path"]), asset_dst)
+    with connect() as con:
+        con.execute(
+            """
+            insert into assets(id, project_id, kind, filename, path, width, height, sha256, metadata, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                asset_id_new, project_id, "template", asset["filename"], rel_path(asset_dst),
+                asset.get("width", 0), asset.get("height", 0), asset["sha256"],
+                dumps({"template_source": size_data["template_source"]}), created,
+            ),
+        )
+
+    # 复制 template 图和 markers
+    tpl_src = storage_path(size_data["template_path"])
+    tpl_dst = project_dir(project_id) / "templates" / f"{asset_id_new}_template.png"
+    tpl_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(tpl_src, tpl_dst)
+    marker_src = storage_path(size_data["red_marker_path"]) if size_data.get("red_marker_path") else None
+    marker_dst = project_dir(project_id) / "templates" / f"{asset_id_new}_red_markers.png" if marker_src else None
+    if marker_src and marker_src.exists() and marker_dst:
+        shutil.copyfile(marker_src, marker_dst)
+
+    # 读取基准 transforms（如果需要复制设计）
+    base_transforms: dict[str, dict] = {}
+    if payload.copy_design_from_base and not size_data.get("is_base"):
+        with connect() as con:
+            base_defs = con.execute(
+                "select * from set_piece_defs where set_id = ?", (payload.set_id,)
+            ).fetchall()
+            for bd in base_defs:
+                bd_data = row_to_dict(bd)
+                base_transforms[bd_data["id"]] = loads(bd_data.get("base_transform") or "{}", {})
+
+    # 复制 pieces
+    pieces_data = list_size_template_pieces(size_id)
+    pieces_dir = project_dir(project_id) / "pieces"
+    pieces_dir.mkdir(parents=True, exist_ok=True)
+    with connect() as con:
+        for index, piece in enumerate(pieces_data, start=1):
+            # 复制 mask
+            mask_src = storage_path(piece["mask_path"])
+            piece_id = f"pc_{index:02d}_{uuid.uuid4().hex[:6]}"
+            mask_dst = pieces_dir / f"{piece_id}_mask.png"
+            shutil.copyfile(mask_src, mask_dst)
+            # 复制 marker
+            from .image_ops import marker_path_for_mask
+            marker_src2 = marker_path_for_mask(mask_src)
+            if marker_src2.exists():
+                marker_dst2 = marker_path_for_mask(mask_dst)
+                shutil.copyfile(marker_src2, marker_dst2)
+
+            # transform
+            transform = PieceTransform().model_dump()
+            if payload.copy_design_from_base and not size_data.get("is_base"):
+                base_t = base_transforms.get(piece["piece_def_id"], {})
+                scale = float(piece.get("scale_to_base", 1.0) or 1.0)
+                transform["mode"] = base_t.get("mode", "global_canvas")
+                transform["design_x"] = base_t.get("design_x", 0)
+                transform["design_y"] = base_t.get("design_y", 0)
+                fallback_scale = 1 if base_t else scale
+                transform["design_width"] = (base_t.get("design_width") or piece["width"]) * scale * fallback_scale
+                transform["design_height"] = (base_t.get("design_height") or piece["height"]) * scale * fallback_scale
+                transform["design_rotation"] = base_t.get("design_rotation", 0)
+                transform["offset_x"] = base_t.get("offset_x", 0) * scale
+                transform["offset_y"] = base_t.get("offset_y", 0) * scale
+                transform["mirror_x"] = base_t.get("mirror_x", False)
+                transform["mirror_y"] = base_t.get("mirror_y", False)
+                transform["grainline_angle"] = base_t.get("grainline_angle", 0)
+                transform["piece_role"] = base_t.get("piece_role", "")
+                transform["role_confirmed"] = base_t.get("role_confirmed", False)
+                transform["global_enabled"] = base_t.get("global_enabled", True)
+                transform["safe_zones"] = base_t.get("safe_zones", [])
+                transform["avoid_zones"] = base_t.get("avoid_zones", [])
+                transform["fit_confidence"] = base_t.get("fit_confidence", 0)
+                transform["fit_note"] = base_t.get("fit_note", "")
+
+            # 读取 piece_def 的 name 和 role
+            def_row = con.execute("select * from set_piece_defs where id = ?", (piece["piece_def_id"],)).fetchone()
+            piece_name = def_row["name"] if def_row else f"裁片 {index:02d}"
+            piece_role = def_row["piece_role"] if def_row else "unknown"
+            transform["piece_role"] = piece_role
+
+            con.execute(
+                """
+                insert into pieces(
+                  id, project_id, name, mask_path, polygon, bbox, source_x, source_y,
+                  width, height, area, centroid_x, centroid_y, transform, created_at, updated_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    piece_id, project_id, piece_name, rel_path(mask_dst),
+                    dumps(piece["polygon"]), dumps(piece["bbox"]),
+                    piece["source_x"], piece["source_y"], piece["width"], piece["height"],
+                    piece["area"], piece["centroid_x"], piece["centroid_y"],
+                    dumps(transform), created, created,
+                ),
+            )
+
+        export_config = {"design_canvas": design_canvas}
+        con.execute(
+            """
+            insert into projects(id, name, size_name, dpi, unit, canvas_width, canvas_height, export_config, created_at, updated_at)
+            values (?, ?, ?, ?, 'px', 0, 0, ?, ?, ?)
+            """,
+            (
+                project_id,
+                f"{set_data['name']}-{size_data['size_name']}",
+                size_data["size_name"],
+                DEFAULT_DPI,
+                dumps(export_config),
+                created,
+                created,
+            ),
+        )
+
+    return get_project_dict(project_id)
+
+
+# ---------------------------------------------------------------------------
+# Template Set helpers
+# ---------------------------------------------------------------------------
+
+def template_set_dir(set_id: str) -> Path:
+    return STORAGE_DIR / "template_sets" / set_id
+
+
+def ensure_template_set(set_id: str) -> None:
+    with connect() as con:
+        row = con.execute("select id from template_sets where id = ?", (set_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Template set not found")
+
+
+def ensure_size_template(size_id: str, set_id: str) -> None:
+    with connect() as con:
+        row = con.execute("select id from size_templates where id = ? and set_id = ?", (size_id, set_id)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Size template not found")
+
+
+def get_template_set_row(set_id: str) -> dict:
+    with connect() as con:
+        row = con.execute("select * from template_sets where id = ?", (set_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Template set not found")
+    return _template_set_out(row_to_dict(row))
+
+
+def get_size_template_row(size_id: str) -> dict:
+    with connect() as con:
+        row = con.execute("select * from size_templates where id = ?", (size_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Size template not found")
+    return row_to_dict(row)
+
+
+def list_set_piece_defs(set_id: str) -> list[dict]:
+    with connect() as con:
+        rows = con.execute(
+            "select * from set_piece_defs where set_id = ? order by sort_order asc, created_at asc",
+            (set_id,),
+        ).fetchall()
+    return [_set_piece_def_out(row_to_dict(row)) for row in rows]
+
+
+def list_size_template_pieces(size_id: str) -> list[dict]:
+    with connect() as con:
+        rows = con.execute(
+            """
+            select p.*, d.name as def_name, d.piece_role as def_role
+            from size_template_pieces p
+            left join set_piece_defs d on d.id = p.piece_def_id
+            where p.size_template_id = ?
+            order by d.sort_order asc, p.area desc
+            """,
+            (size_id,),
+        ).fetchall()
+    result = []
+    for row in rows:
+        data = row_to_dict(row)
+        data["polygon"] = loads(data["polygon"], [])
+        data["bbox"] = loads(data["bbox"], {})
+        data["mask_url"] = file_url(data["mask_path"])
+        data["name"] = data.get("def_name") or "未命名"
+        data["piece_role"] = data.get("def_role") or "unknown"
+        result.append(data)
+    return result
+
+
+def raw_template_pieces(size_id: str) -> list[dict]:
+    with connect() as con:
+        rows = con.execute(
+            "select * from size_template_pieces where size_template_id = ? order by area desc", (size_id,)
+        ).fetchall()
+    pieces = []
+    for row in rows:
+        data = row_to_dict(row)
+        data["bbox"] = loads(data["bbox"], {})
+        data["polygon"] = loads(data["polygon"], [])
+        data["mask_path"] = storage_path(data["mask_path"])
+        pieces.append(data)
+    return pieces
+
+
+def raw_size_template_geos(size_id: str) -> list[dict]:
+    return raw_template_pieces(size_id)
+
+
+def _template_set_out(data: dict) -> dict:
+    data["design_canvas"] = loads(data.get("design_canvas") or "{}", {})
+    return data
+
+
+def _size_template_out(data: dict) -> dict:
+    data["template_url"] = file_url(data["template_path"]) if data.get("template_path") else ""
+    data["red_marker_url"] = file_url(data["red_marker_path"]) if data.get("red_marker_path") else ""
+    return data
+
+
+def _size_template_piece_out(data: dict) -> dict:
+    data["polygon"] = loads(data["polygon"], [])
+    data["bbox"] = loads(data["bbox"], {})
+    data["mask_url"] = file_url(data["mask_path"])
+    return data
+
+
+def _set_piece_def_out(data: dict) -> dict:
+    data["base_transform"] = loads(data.get("base_transform") or "{}", {})
+    return data
+
+
 def _generate_texture_job(job_id: str, payload: dict) -> dict:
     project_id = _job_project(job_id)
     texture_id = f"tex_{uuid.uuid4().hex[:10]}"
@@ -356,6 +988,7 @@ def _generate_texture_job(job_id: str, payload: dict) -> dict:
         asset = get_asset_row(payload["source_asset_id"], project_id)
         source_filename = asset.get("filename", "")
         src = storage_path(asset["path"])
+        ensure_image_within_limit(src)
         dst = textures_dir / f"{texture_id}_source{src.suffix.lower() or '.png'}"
         shutil.copyfile(src, dst)
         source_path = rel_path(dst)
@@ -363,6 +996,7 @@ def _generate_texture_job(job_id: str, payload: dict) -> dict:
     else:
         width = int(payload.get("tile_width") or 2048)
         height = int(payload.get("tile_height") or 2048)
+        ensure_dimensions_within_limit(width, height)
         dst = textures_dir / f"{texture_id}_source.png"
         provider = get_provider(payload.get("provider", "local"))
         provider.generate_texture(payload.get("prompt") or "服装布料纹理", dst, width, height, payload.get("seed", ""))
@@ -378,7 +1012,10 @@ def _generate_texture_job(job_id: str, payload: dict) -> dict:
     seamless_mode = ""
     if fit_source == "seamless":
         seamless_out = textures_dir / f"{texture_id}_seamless.png"
-        make_mirror_tile(storage_path(source_path), seamless_out, int(payload.get("tile_width") or 4096), int(payload.get("tile_height") or 4096))
+        seamless_width = int(payload.get("tile_width") or 4096)
+        seamless_height = int(payload.get("tile_height") or 4096)
+        ensure_dimensions_within_limit(seamless_width, seamless_height)
+        make_mirror_tile(storage_path(source_path), seamless_out, seamless_width, seamless_height)
         seamless_path = rel_path(seamless_out)
         seamless_mode = "mirror"
         width, height = image_size(seamless_out)
@@ -418,9 +1055,11 @@ def _seamless_job(job_id: str, payload: dict) -> dict:
     project_id = _job_project(job_id)
     texture = get_texture_row(payload["texture_id"], project_id)
     source = storage_path(texture["source_path"])
+    ensure_image_within_limit(source)
     out = project_dir(project_id) / "textures" / f"{texture['id']}_seamless.png"
     width = int(payload.get("width") or 4096)
     height = int(payload.get("height") or 4096)
+    ensure_dimensions_within_limit(width, height)
     if payload.get("mode") == "offset":
         make_offset_tile(source, out, width, height)
     else:
@@ -856,6 +1495,13 @@ def safe_image_size(path: Path) -> tuple[int, int]:
         return image_size(path)
     except Exception:
         return 0, 0
+
+
+def ensure_job_dimensions(width: int, height: int) -> None:
+    try:
+        ensure_dimensions_within_limit(width, height)
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
 
 def file_url(relative: str) -> str:
