@@ -186,6 +186,7 @@ class TemplateSetOut(BaseModel):
     description: str
     base_size_template_id: str
     design_canvas: dict[str, Any]
+    has_mapping_issues: bool
     created_at: str
     updated_at: str
 

@@ -195,6 +195,7 @@ export type TemplateSet = {
   description: string;
   base_size_template_id: string;
   design_canvas: Record<string, unknown>;
+  has_mapping_issues: boolean;
   created_at: string;
   updated_at: string;
 };

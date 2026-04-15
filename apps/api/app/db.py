@@ -171,7 +171,10 @@ def dumps(data: Any) -> str:
 def loads(value: str | None, default: Any = None) -> Any:
     if value is None:
         return default
-    return json.loads(value)
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
 
 
 @contextmanager

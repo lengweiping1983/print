@@ -10,7 +10,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .config import DEFAULT_DPI, PROJECTS_DIR, STORAGE_DIR
+from .config import DEFAULT_DPI, MAX_UPLOAD_BYTES, PROJECTS_DIR, STORAGE_DIR
 from .db import connect, dumps, init_db, loads, now_iso, rel_path, row_to_dict, storage_path
 from .design_ops import build_design_texture_canvas, build_fit_preview, build_safety_report
 from .image_ops import (
@@ -56,6 +56,8 @@ from .schemas import (
 )
 from .template_ops import match_pieces_to_base, pick_default_base_size, size_sort_key
 from .texture_analysis import analyze_texture_fit_source
+
+ALLOWED_UPLOAD_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".svg"}
 
 
 @asynccontextmanager
@@ -127,12 +129,20 @@ async def upload_asset(
     ensure_project(project_id)
     asset_id = f"ast_{uuid.uuid4().hex[:12]}"
     suffix = Path(file.filename or "asset.bin").suffix.lower() or ".bin"
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        raise HTTPException(status_code=415, detail=f"不支持的文件格式：{suffix}，仅允许图片文件。")
     asset_dir = project_dir(project_id) / "assets"
     asset_dir.mkdir(parents=True, exist_ok=True)
     dst = asset_dir / f"{asset_id}{suffix}"
     sha = hashlib.sha256()
+    total = 0
     with dst.open("wb") as fh:
         while chunk := await file.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                fh.close()
+                dst.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail=f"文件超过 {MAX_UPLOAD_BYTES // 1024 // 1024} MB 上限。")
             sha.update(chunk)
             fh.write(chunk)
     try:
@@ -429,12 +439,20 @@ async def upload_template_set_asset(
     ensure_template_set(set_id)
     asset_id = f"ast_{uuid.uuid4().hex[:12]}"
     suffix = Path(file.filename or "asset.bin").suffix.lower() or ".bin"
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        raise HTTPException(status_code=415, detail=f"不支持的文件格式：{suffix}，仅允许图片文件。")
     asset_dir = template_set_dir(set_id) / "assets"
     asset_dir.mkdir(parents=True, exist_ok=True)
     dst = asset_dir / f"{asset_id}{suffix}"
     sha = hashlib.sha256()
+    total = 0
     with dst.open("wb") as fh:
         while chunk := await file.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                fh.close()
+                dst.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail=f"文件超过 {MAX_UPLOAD_BYTES // 1024 // 1024} MB 上限。")
             sha.update(chunk)
             fh.write(chunk)
     width, height = safe_image_size(dst)
@@ -955,7 +973,32 @@ def raw_size_template_geos(size_id: str) -> list[dict]:
 
 def _template_set_out(data: dict) -> dict:
     data["design_canvas"] = loads(data.get("design_canvas") or "{}", {})
+    data["has_mapping_issues"] = compute_mapping_issues(data["id"])
     return data
+
+
+def compute_mapping_issues(set_id: str) -> bool:
+    with connect() as con:
+        def_count = con.execute("select count(*) from set_piece_defs where set_id = ?", (set_id,)).fetchone()[0]
+        size_rows = con.execute("select id, pieces_count from size_templates where set_id = ?", (set_id,)).fetchall()
+        if not size_rows:
+            return False
+        if def_count == 0:
+            return True
+        for size_row in size_rows:
+            size_id = size_row["id"]
+            pieces = con.execute(
+                "select piece_def_id from size_template_pieces where size_template_id = ?", (size_id,)
+            ).fetchall()
+            if len(pieces) != def_count:
+                return True
+            seen = set()
+            for p in pieces:
+                pid = p["piece_def_id"]
+                if not pid or pid in seen:
+                    return True
+                seen.add(pid)
+    return False
 
 
 def _size_template_out(data: dict) -> dict:

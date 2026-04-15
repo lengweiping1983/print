@@ -1,10 +1,11 @@
 "use client";
 
-import type { SetPieceDef, SizeTemplate, TemplateSet } from "@print-studio/shared-types";
+import type { SetPieceDef, SizeTemplate, SizeTemplatePiece, TemplateSet } from "@print-studio/shared-types";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { PIECE_ROLE_LABELS } from "@/lib/labels";
 
 export default function TemplateSetDetailPage() {
   const { setId } = useParams<{ setId: string }>();
@@ -12,6 +13,7 @@ export default function TemplateSetDetailPage() {
   const [templateSet, setTemplateSet] = useState<TemplateSet | null>(null);
   const [sizes, setSizes] = useState<SizeTemplate[]>([]);
   const [pieceDefs, setPieceDefs] = useState<SetPieceDef[]>([]);
+  const [sizePiecesMap, setSizePiecesMap] = useState<Record<string, SizeTemplatePiece[]>>({});
   const [loading, setLoading] = useState(true);
   const [importingSize, setImportingSize] = useState("");
   const [notice, setNotice] = useState("");
@@ -32,6 +34,17 @@ export default function TemplateSetDetailPage() {
     setTemplateSet(ts);
     setSizes(szs);
     setPieceDefs(defs);
+
+    const piecesMap: Record<string, SizeTemplatePiece[]> = {};
+    if (szs.length) {
+      const piecesResults = await Promise.all(
+        szs.map((s) => api.listTemplateSizePieces(setId, s.id).catch(() => [] as SizeTemplatePiece[]))
+      );
+      szs.forEach((s, idx) => {
+        piecesMap[s.id] = piecesResults[idx];
+      });
+    }
+    setSizePiecesMap(piecesMap);
     setLoading(false);
   }
 
@@ -49,7 +62,6 @@ export default function TemplateSetDetailPage() {
       } else {
         setNotice(`${sizeName} 导入完成，共 ${result.pieces.length} 个裁片。`);
       }
-      // 如果这是第一个导入的，自动刷新套装信息以更新基准
       await refresh();
     } catch (err) {
       setNotice(String(err instanceof Error ? err.message : "导入失败"));
@@ -73,9 +85,56 @@ export default function TemplateSetDetailPage() {
     setNotice(`${sizeName} 已删除`);
   }
 
+  async function updateDefName(defId: string, name: string) {
+    if (!setId) return;
+    await api.patchTemplateSetPieceDef(setId, defId, { name });
+    await refresh();
+    setNotice("名称已更新");
+  }
+
+  async function updateDefRole(defId: string, piece_role: string) {
+    if (!setId) return;
+    await api.patchTemplateSetPieceDef(setId, defId, { piece_role });
+    await refresh();
+    setNotice("角色已更新");
+  }
+
+  async function reassignPiece(sizeId: string, pieceId: string, defId: string) {
+    if (!setId) return;
+    await api.patchTemplateSizePiece(setId, sizeId, pieceId, { piece_def_id: defId });
+    await refresh();
+    setNotice("关联已修正");
+  }
+
   const sortedSizes = useMemo(() => {
     return [...sizes].sort((a, b) => a.size_name.localeCompare(b.size_name));
   }, [sizes]);
+
+  const sortedDefs = useMemo(() => {
+    return [...pieceDefs].sort((a, b) => a.sort_order - b.sort_order);
+  }, [pieceDefs]);
+
+  const problemSizes = useMemo(() => {
+    const problems: string[] = [];
+    for (const size of sortedSizes) {
+      const pieces = sizePiecesMap[size.id] || [];
+      if (pieces.length !== pieceDefs.length) {
+        problems.push(size.size_name);
+        continue;
+      }
+      const seen = new Set<string>();
+      let ok = true;
+      for (const p of pieces) {
+        if (!p.piece_def_id || seen.has(p.piece_def_id)) {
+          ok = false;
+          break;
+        }
+        seen.add(p.piece_def_id);
+      }
+      if (!ok) problems.push(size.size_name);
+    }
+    return problems;
+  }, [sortedSizes, sizePiecesMap, pieceDefs.length]);
 
   if (loading) {
     return (
@@ -107,7 +166,14 @@ export default function TemplateSetDetailPage() {
         </div>
       </header>
 
-      {notice && (
+      {templateSet.has_mapping_issues && (
+        <div className="mb-4 rounded-lg border border-coral/30 bg-coral/10 px-4 py-3 text-sm text-coral">
+          <p className="font-semibold">⚠️ 当前套装存在裁片对应关系异常</p>
+          <p className="mt-1">请在对照表中核对并修正，否则导出结果可能不正确。异常尺寸：{problemSizes.join("、") || "—"}</p>
+        </div>
+      )}
+
+      {notice && !templateSet.has_mapping_issues && (
         <div className="mb-4 rounded-lg border border-line bg-white px-4 py-3 text-sm shadow-panel">
           {notice}
         </div>
@@ -127,6 +193,110 @@ export default function TemplateSetDetailPage() {
           </div>
         )}
       </section>
+
+      {sortedSizes.length > 0 && sortedDefs.length > 0 && (
+        <section className="mb-6 rounded-lg border border-line bg-white p-4 shadow-panel">
+          <h2 className="mb-4 text-lg font-semibold">裁片对照表</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th className="sticky left-0 z-10 min-w-[180px] border border-line bg-slate-50 px-3 py-2 text-left font-semibold">
+                    裁片定义
+                  </th>
+                  {sortedSizes.map((size) => (
+                    <th
+                      key={size.id}
+                      className={`min-w-[120px] border border-line px-2 py-2 text-center font-semibold ${
+                        problemSizes.includes(size.size_name) ? "bg-coral/10 text-coral" : "bg-slate-50"
+                      }`}
+                    >
+                      {size.size_name}
+                      {size.is_base && <span className="ml-1 text-[10px] text-action">基准</span>}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedDefs.map((def) => (
+                  <tr key={def.id}>
+                    <td className="sticky left-0 z-10 border border-line bg-white px-3 py-2 align-top">
+                      <div className="space-y-2">
+                        <input
+                          className="w-full rounded border border-line px-2 py-1 text-xs"
+                          defaultValue={def.name}
+                          onBlur={(e) => {
+                            if (e.target.value !== def.name) {
+                              updateDefName(def.id, e.target.value);
+                            }
+                          }}
+                        />
+                        <select
+                          className="w-full rounded border border-line bg-white px-2 py-1 text-xs"
+                          defaultValue={def.piece_role}
+                          onChange={(e) => updateDefRole(def.id, e.target.value)}
+                        >
+                          {Object.entries(PIECE_ROLE_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </td>
+                    {sortedSizes.map((size) => {
+                      const pieces = (sizePiecesMap[size.id] || []).filter((p) => p.piece_def_id === def.id);
+                      const unmatched = (sizePiecesMap[size.id] || []).filter((p) => !p.piece_def_id);
+                      if (pieces.length === 0) {
+                        return (
+                          <td key={size.id} className="border border-line bg-coral/5 px-2 py-2 align-top text-center">
+                            <div className="text-xs font-medium text-coral">缺失</div>
+                            {unmatched.length > 0 && (
+                              <select
+                                className="mt-1 w-full rounded border border-coral/30 bg-white px-1 py-1 text-[10px]"
+                                value=""
+                                onChange={(e) => reassignPiece(size.id, e.target.value, def.id)}
+                              >
+                                <option value="">绑定未分配裁片</option>
+                                {unmatched.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.width}×{p.height}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                        );
+                      }
+                      if (pieces.length > 1) {
+                        return (
+                          <td key={size.id} className="border border-line bg-coral/10 px-2 py-2 align-top text-center">
+                            <div className="text-xs font-medium text-coral">重复绑定</div>
+                            <div className="mt-1 text-[10px] text-slate-500">{pieces.length} 个裁片</div>
+                          </td>
+                        );
+                      }
+                      const piece = pieces[0];
+                      return (
+                        <td key={size.id} className="border border-line px-2 py-2 align-top text-center">
+                          <img
+                            src={piece.mask_url}
+                            alt={piece.name}
+                            className="checkerboard mx-auto h-12 w-12 rounded object-contain"
+                          />
+                          <div className="mt-1 text-[10px] text-slate-600">
+                            {piece.width}×{piece.height}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
         <h2 className="mb-4 text-lg font-semibold">尺寸模板</h2>

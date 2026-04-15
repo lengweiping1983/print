@@ -11,7 +11,6 @@ import { Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva/es/Re
 const loadedImageCache = new Map<string, Promise<HTMLImageElement | null>>();
 const loadedImageValueCache = new Map<string, HTMLImageElement | null>();
 const luminanceMaskCache = new Map<string, HTMLCanvasElement>();
-const outlineMaskCache = new Map<string, HTMLCanvasElement>();
 
 function useLoadedImage(src: string, fallbackSrc = "") {
   const cacheKey = imageCacheKey(src, fallbackSrc);
@@ -81,7 +80,9 @@ function useElementSize<T extends HTMLElement>() {
     if (!node) return;
     const observer = new ResizeObserver(([entry]) => {
       const rect = entry.contentRect;
-      setSize({ width: rect.width, height: rect.height });
+      const width = Math.round(rect.width);
+      const height = 0;
+      setSize((current) => (current.width === width && current.height === height ? current : { width, height }));
     });
     observer.observe(node);
     return () => observer.disconnect();
@@ -132,74 +133,6 @@ function useLuminanceMaskImage(image: HTMLImageElement | null, cacheKey = "") {
   }, [image, cacheKey]);
 
   return mask;
-}
-
-function useMaskOutlineImage(mask: HTMLCanvasElement | null, strokeWidth = 1, enabled = true, cacheKey = "") {
-  const outlineKey = mask && enabled ? `${cacheKey || `${mask.width}x${mask.height}`}:${strokeWidth}` : "";
-  const [outline, setOutline] = useState<HTMLCanvasElement | null>(() => (outlineKey ? outlineMaskCache.get(outlineKey) ?? null : null));
-
-  useEffect(() => {
-    if (!mask || !enabled) {
-      setOutline(null);
-      return;
-    }
-    const key = `${cacheKey || `${mask.width}x${mask.height}`}:${strokeWidth}`;
-    const cached = outlineMaskCache.get(key);
-    if (cached) {
-      setOutline(cached);
-      return;
-    }
-
-    const context = mask.getContext("2d");
-    if (!context) {
-      setOutline(null);
-      return;
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = mask.width;
-    canvas.height = mask.height;
-    const outlineContext = canvas.getContext("2d");
-    if (!outlineContext) {
-      setOutline(null);
-      return;
-    }
-
-    const source = context.getImageData(0, 0, mask.width, mask.height);
-    const output = outlineContext.createImageData(mask.width, mask.height);
-    const radius = Math.max(1, Math.round(strokeWidth));
-    const isOpaque = (x: number, y: number) => {
-      if (x < 0 || y < 0 || x >= mask.width || y >= mask.height) return false;
-      return source.data[(y * mask.width + x) * 4 + 3] > 10;
-    };
-    for (let y = 0; y < mask.height; y += 1) {
-      for (let x = 0; x < mask.width; x += 1) {
-        if (!isOpaque(x, y)) continue;
-        let edge = false;
-        for (let oy = -radius; oy <= radius && !edge; oy += 1) {
-          for (let ox = -radius; ox <= radius; ox += 1) {
-            if (ox * ox + oy * oy > radius * radius) continue;
-            if (!isOpaque(x + ox, y + oy)) {
-              edge = true;
-              break;
-            }
-          }
-        }
-        if (edge) {
-          const index = (y * mask.width + x) * 4;
-          output.data[index] = 224;
-          output.data[index + 1] = 82;
-          output.data[index + 2] = 82;
-          output.data[index + 3] = 255;
-        }
-      }
-    }
-    outlineContext.putImageData(output, 0, 0);
-    outlineMaskCache.set(key, canvas);
-    setOutline(canvas);
-  }, [mask, strokeWidth, enabled, cacheKey]);
-
-  return outline;
 }
 
 type Props = {
@@ -264,9 +197,6 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
     const height = Math.max(1, selected.height * scale);
     return { x: (stageWidth - width) / 2, y: (stageHeight - height) / 2, width, height };
   }, [selected, stageHeight, stageWidth]);
-  const selectedMaskScale = selectedMaskFrame && selected ? selectedMaskFrame.width / Math.max(1, selected.width) : 1;
-  const selectedOutlineSourceWidth = Math.max(1, outlineWidth / Math.max(0.1, selectedMaskScale * pieceZoom));
-  const selectedOutlineImage = useMaskOutlineImage(alphaMaskImage, selectedOutlineSourceWidth, showOutlines, `${selectedMaskKey}:${selectedOutlineSourceWidth.toFixed(2)}`);
 
   return (
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
@@ -319,13 +249,16 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
           )}
           {showOutlines && (
             <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
-              {selectedMaskFrame && selectedOutlineImage && (
-                <KonvaImage
-                  image={selectedOutlineImage}
+              {selectedMaskFrame && (
+                <Rect
                   x={selectedMaskFrame.x}
                   y={selectedMaskFrame.y}
                   width={selectedMaskFrame.width}
                   height={selectedMaskFrame.height}
+                  stroke="#e05252"
+                  strokeWidth={outlineWidth}
+                  strokeScaleEnabled={false}
+                  listening={false}
                 />
               )}
             </Layer>
@@ -367,29 +300,49 @@ export function LayoutPreview({
 }: LayoutPreviewProps) {
   const textureImage = useLoadedImage(textureUrl, fallbackTextureUrl);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
+  const [designZoom, setDesignZoom] = useState(0.25);
   const [previewMode, setPreviewMode] = useState<"layout" | "design">("layout");
   const [previewWrapRef, previewWrapSize] = useElementSize<HTMLDivElement>();
-  const bounds = useMemo(() => {
-    if (previewMode === "design") {
-      return {
-        width: Math.max(1200, designCanvas?.width || textureImage?.naturalWidth || 1200),
-        height: Math.max(760, designCanvas?.height || textureImage?.naturalHeight || 760)
-      };
-    }
+  const layoutBounds = useMemo(() => {
     const width = Math.max(1200, ...pieces.map((piece) => piece.source_x + piece.width + 80), 1200);
     const height = Math.max(760, ...pieces.map((piece) => piece.source_y + piece.height + 80), 760);
     return { width, height };
-  }, [pieces, previewMode, textureImage, designCanvas]);
-  const fitZoom = useMemo(() => {
+  }, [pieces]);
+  const designBounds = useMemo(
+    () => ({
+      width: Math.max(1200, designCanvas?.width || textureImage?.naturalWidth || 1200),
+      height: Math.max(760, designCanvas?.height || textureImage?.naturalHeight || 760)
+    }),
+    [designCanvas, textureImage]
+  );
+  const layoutFitZoom = useMemo(() => {
     const maxWidth = Math.max(360, previewWrapSize.width || 980);
-    const maxHeight = Math.max(360, Math.min(720, previewWrapSize.height || 720));
-    const next = Math.min(maxWidth / bounds.width, maxHeight / bounds.height, 1);
+    const maxHeight = 720;
+    const next = Math.min(maxWidth / layoutBounds.width, maxHeight / layoutBounds.height, 1);
     return Math.max(0.05, Number(next.toFixed(2)));
-  }, [bounds, previewWrapSize.height, previewWrapSize.width]);
+  }, [layoutBounds, previewWrapSize.width]);
+  const designFitZoom = useMemo(() => {
+    const maxWidth = Math.max(360, previewWrapSize.width || 980);
+    const maxHeight = 720;
+    const next = Math.min(maxWidth / designBounds.width, maxHeight / designBounds.height, 1);
+    return Math.max(0.05, Number(next.toFixed(2)));
+  }, [designBounds, previewWrapSize.width]);
+  const currentZoom = previewMode === "design" ? designZoom : layoutZoom;
+  const updateCurrentZoom = (updater: (zoom: number) => number) => {
+    if (previewMode === "design") {
+      setDesignZoom(updater);
+    } else {
+      setLayoutZoom(updater);
+    }
+  };
 
   useEffect(() => {
-    setLayoutZoom(fitZoom);
-  }, [fitZoom]);
+    setLayoutZoom(layoutFitZoom);
+  }, [layoutFitZoom]);
+
+  useEffect(() => {
+    setDesignZoom(designFitZoom);
+  }, [designFitZoom]);
 
   return (
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
@@ -404,20 +357,51 @@ export function LayoutPreview({
           <span className="rounded-md bg-mist px-2 py-1.5 text-sm text-slate-600">{pieces.length} 个裁片</span>
           <ZoomButton label="排版" onClick={() => setPreviewMode("layout")} />
           <ZoomButton label="设计画布" onClick={() => setPreviewMode("design")} />
-          <ZoomButton label="-" onClick={() => setLayoutZoom((zoom) => clampZoom(zoom - 0.05))} />
-          <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(layoutZoom * 100)}%</span>
-          <ZoomButton label="+" onClick={() => setLayoutZoom((zoom) => clampZoom(zoom + 0.05))} />
-          <ZoomButton label="100%" onClick={() => setLayoutZoom(1)} />
+          <ZoomButton label="-" onClick={() => updateCurrentZoom((zoom) => clampZoom(zoom - 0.05))} />
+          <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(currentZoom * 100)}%</span>
+          <ZoomButton label="+" onClick={() => updateCurrentZoom((zoom) => clampZoom(zoom + 0.05))} />
+          <ZoomButton label="100%" onClick={() => updateCurrentZoom(() => 1)} />
         </div>
       </div>
       <div ref={previewWrapRef} className="flex max-h-[760px] min-h-[360px] justify-center overflow-auto rounded-lg border border-line bg-white">
-        <Stage width={Math.ceil(bounds.width * layoutZoom)} height={Math.ceil(bounds.height * layoutZoom)}>
-          <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
-            <Rect x={0} y={0} width={bounds.width} height={bounds.height} fill="#ffffff" />
-            {previewMode === "design" && textureImage && <KonvaImage image={textureImage} x={0} y={0} width={bounds.width} height={bounds.height} />}
-          </Layer>
-          {previewMode === "design" && (
+        <div className={previewMode === "layout" ? "block shrink-0" : "hidden shrink-0"}>
+          <Stage width={Math.ceil(layoutBounds.width * layoutZoom)} height={Math.ceil(layoutBounds.height * layoutZoom)}>
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
+              <Rect x={0} y={0} width={layoutBounds.width} height={layoutBounds.height} fill="#ffffff" />
+            </Layer>
+            {textureImage &&
+              pieces.map((piece) => (
+                <LayoutPieceTexture
+                  key={`texture-${piece.id}`}
+                  piece={piece}
+                  textureImage={textureImage}
+                  selected={piece.id === selectedPieceId}
+                  zoom={layoutZoom}
+                  onSelect={() => onSelectPiece(piece.id)}
+                />
+              ))}
+            {showOutlines && (
+              <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
+                {pieces.map((piece) => (
+                  <PieceOutline
+                    key={`outline-${piece.id}`}
+                    piece={piece}
+                    selected={piece.id === selectedPieceId}
+                    outlineWidth={outlineWidth}
+                    onSelect={() => onSelectPiece(piece.id)}
+                  />
+                ))}
+              </Layer>
+            )}
+          </Stage>
+        </div>
+        <div className={previewMode === "design" ? "block shrink-0" : "hidden shrink-0"}>
+          <Stage width={Math.ceil(designBounds.width * designZoom)} height={Math.ceil(designBounds.height * designZoom)}>
+            <Layer scaleX={designZoom} scaleY={designZoom}>
+              <Rect x={0} y={0} width={designBounds.width} height={designBounds.height} fill="#ffffff" />
+              {textureImage && <KonvaImage image={textureImage} x={0} y={0} width={designBounds.width} height={designBounds.height} />}
+            </Layer>
+            <Layer scaleX={designZoom} scaleY={designZoom}>
               {(designCanvas?.layers || []).map((layer) => (
                 <DesignLayerNode
                   key={layer.id}
@@ -428,48 +412,23 @@ export function LayoutPreview({
                 />
               ))}
             </Layer>
-          )}
-          {previewMode === "layout" &&
-            textureImage &&
-            pieces.map((piece) => (
-              <LayoutPieceTexture
-                key={`texture-${piece.id}`}
-                piece={piece}
-                textureImage={textureImage}
-                selected={piece.id === selectedPieceId}
-                zoom={layoutZoom}
-                onSelect={() => onSelectPiece(piece.id)}
-              />
-            ))}
-          {previewMode === "design" && showOutlines && (
-            <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
-              {pieces.map((piece) => (
-                <DesignRegionOutline
-                  key={`design-${piece.id}`}
-                  piece={piece}
-                  selected={piece.id === selectedPieceId}
-                  outlineWidth={outlineWidth}
-                  zoom={layoutZoom}
-                  onSelect={() => onSelectPiece(piece.id)}
-                  onChange={(update) => onMoveDesignRegion(piece, update)}
-                />
-              ))}
-            </Layer>
-          )}
-          {previewMode === "layout" && showOutlines && (
-            <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
-              {pieces.map((piece) => (
-                <PieceOutline
-                  key={`outline-${piece.id}`}
-                  piece={piece}
-                  selected={piece.id === selectedPieceId}
-                  outlineWidth={outlineWidth}
-                  onSelect={() => onSelectPiece(piece.id)}
-                />
-              ))}
-            </Layer>
-          )}
-        </Stage>
+            {showOutlines && (
+              <Layer scaleX={designZoom} scaleY={designZoom}>
+                {pieces.map((piece) => (
+                  <DesignRegionOutline
+                    key={`design-${piece.id}`}
+                    piece={piece}
+                    selected={piece.id === selectedPieceId}
+                    outlineWidth={outlineWidth}
+                    zoom={designZoom}
+                    onSelect={() => onSelectPiece(piece.id)}
+                    onChange={(update) => onMoveDesignRegion(piece, update)}
+                  />
+                ))}
+              </Layer>
+            )}
+          </Stage>
+        </div>
       </div>
     </section>
   );
@@ -803,30 +762,17 @@ function LayoutPieceTexture({
 }
 
 function PieceOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piece; selected: boolean; outlineWidth: number; onSelect: () => void }) {
-  const mask = useLoadedImage(piece.mask_url);
-  const alphaMask = useLuminanceMaskImage(mask, piece.mask_url);
-  const outline = useMaskOutlineImage(alphaMask, outlineWidth, true, piece.mask_url);
   return (
     <>
-      {outline && (
-        <KonvaImage
-          image={outline}
-          x={piece.source_x}
-          y={piece.source_y}
-          width={piece.width}
-          height={piece.height}
-          opacity={selected ? 1 : 0.55}
-          onClick={onSelect}
-          onTap={onSelect}
-        />
-      )}
       <Rect
         x={piece.source_x}
         y={piece.source_y}
         width={piece.width}
         height={piece.height}
-        stroke="rgba(0,0,0,0)"
-        strokeWidth={1}
+        stroke="#e05252"
+        strokeWidth={outlineWidth}
+        strokeScaleEnabled={false}
+        opacity={selected ? 1 : 0.55}
         onClick={onSelect}
         onTap={onSelect}
       />
