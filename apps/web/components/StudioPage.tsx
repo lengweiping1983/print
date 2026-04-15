@@ -34,6 +34,7 @@ export function StudioPage() {
   const [templateFileName, setTemplateFileName] = useState("");
   const [textureFileName, setTextureFileName] = useState("");
   const [textureViewMode, setTextureViewMode] = useState<"source" | "seamless">("source");
+  const [showOutlines, setShowOutlines] = useState(true);
 
   useEffect(() => {
     api
@@ -139,20 +140,6 @@ export function StudioPage() {
     setPieces((current) => current.map((piece) => (piece.id === saved.id ? saved : piece)));
   }
 
-  async function renderPreview() {
-    if (!project) return;
-    try {
-      setNotice("正在生成整套预览...");
-      const created = await api.renderPreview(project.id, activeTexture?.id ?? "");
-      const done = await waitForJob(created.job_id, setJob);
-      const url = String(done.output.preview_url || "");
-      setNotice(url ? `预览已生成：${url}` : "预览已生成。");
-      await refreshTextures(project.id);
-    } catch (error) {
-      setNotice(readError(error));
-    }
-  }
-
   async function exportPack() {
     if (!project) return;
     try {
@@ -182,9 +169,6 @@ export function StudioPage() {
           <p className="m-0 mt-2 text-sm text-slate-500">{notice}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="rounded-lg bg-white px-4 py-2 font-semibold text-ink ring-1 ring-line" onClick={renderPreview}>
-            生成预览
-          </button>
           <button className="rounded-lg bg-action px-4 py-2 font-semibold text-white" onClick={exportPack}>
             导出打样包
           </button>
@@ -223,6 +207,7 @@ export function StudioPage() {
           </Panel>
 
           <Panel title="裁片">
+            <p className="m-0 mb-3 text-xs text-slate-500">裁片数量：{pieces.length}</p>
             <div className="max-h-[520px] space-y-2 overflow-auto">
               {pieces.length === 0 && <p className="text-sm text-slate-500">上传透明模板后会显示裁片。</p>}
               {pieces.map((piece) => (
@@ -249,9 +234,10 @@ export function StudioPage() {
         <Workspace
           pieces={pieces}
           selectedPieceId={selectedPieceId}
-          texture={activeTexture}
           textureUrl={activeTextureUrl}
+          showOutlines={showOutlines}
           onSelectPiece={setSelectedPieceId}
+          onToggleOutlines={setShowOutlines}
           onMovePiece={(piece, x, y) => {
             setSelectedPieceId(piece.id);
             void patchPiece(piece.id, { offset_x: Math.round(x), offset_y: Math.round(y) });
@@ -283,10 +269,11 @@ export function StudioPage() {
             )}
           </Panel>
 
-          <Panel title="纹理与导出">
+          <Panel title="纹理">
             {activeTexture ? (
               <div className="space-y-3">
                 <img className="checkerboard h-48 w-full rounded-lg object-contain" src={activeTextureUrl} alt="当前纹理" />
+                <p className="m-0 text-xs text-slate-500">纹理大小：{activeTexture.width} x {activeTexture.height}</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     className={`rounded-lg px-3 py-2 text-sm font-semibold ring-1 ring-line ${
@@ -326,15 +313,6 @@ export function StudioPage() {
               <div>状态：{job?.status ?? "ready"}</div>
               <div>进度：{job ? Math.round(job.progress * 100) : 0}%</div>
             </div>
-          </Panel>
-
-          <Panel title="检查项">
-            <ul className="m-0 space-y-2 p-0 text-sm text-slate-600">
-              <li>裁片数量：{pieces.length}</li>
-              <li>DPI：{project?.dpi ?? 300}</li>
-              <li>当前纹理：{activeTexture ? `${activeTexture.width} x ${activeTexture.height}` : "未生成"}</li>
-              <li>导出：透明 PNG、整套预览、manifest、ZIP</li>
-            </ul>
           </Panel>
         </aside>
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Piece, Texture } from "@print-studio/shared-types";
+import type { Piece } from "@print-studio/shared-types";
 import "konva/lib/shapes/Image.js";
 import "konva/lib/shapes/Rect.js";
 import "konva/lib/shapes/Text.js";
@@ -116,13 +116,14 @@ function useMaskOutlineImage(mask: HTMLCanvasElement | null) {
 type Props = {
   pieces: Piece[];
   selectedPieceId: string;
-  texture: Texture | null;
   textureUrl: string;
+  showOutlines: boolean;
   onSelectPiece: (id: string) => void;
+  onToggleOutlines: (visible: boolean) => void;
   onMovePiece: (piece: Piece, x: number, y: number) => void;
 };
 
-export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, onSelectPiece, onMovePiece }: Props) {
+export function KonvaWorkspace({ pieces, selectedPieceId, textureUrl, showOutlines, onSelectPiece, onToggleOutlines, onMovePiece }: Props) {
   const textureImage = useLoadedImage(textureUrl);
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
@@ -162,6 +163,10 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, o
             <p className="m-0 mt-1 text-sm text-slate-500">拖动裁片中的布料，微调重点花位。</p>
           </div>
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-ink ring-1 ring-line">
+              <input type="checkbox" checked={showOutlines} onChange={(event) => onToggleOutlines(event.target.checked)} />
+              显示线框
+            </label>
             <ZoomButton label="-" onClick={() => setPieceZoom((zoom) => clampZoom(zoom - 0.1))} />
             <span className="min-w-14 rounded-md bg-mist px-2 py-1 text-center text-xs text-slate-600">{Math.round(pieceZoom * 100)}%</span>
             <ZoomButton label="+" onClick={() => setPieceZoom((zoom) => clampZoom(zoom + 0.1))} />
@@ -185,17 +190,19 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, o
                 onMove={(x, y) => onMovePiece(selected, x, y)}
               />
             )}
-            <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
-              {selectedMaskFrame && selectedOutlineImage && (
-                <KonvaImage
-                  image={selectedOutlineImage}
-                  x={selectedMaskFrame.x}
-                  y={selectedMaskFrame.y}
-                  width={selectedMaskFrame.width}
-                  height={selectedMaskFrame.height}
-                />
-              )}
-            </Layer>
+            {showOutlines && (
+              <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
+                {selectedMaskFrame && selectedOutlineImage && (
+                  <KonvaImage
+                    image={selectedOutlineImage}
+                    x={selectedMaskFrame.x}
+                    y={selectedMaskFrame.y}
+                    width={selectedMaskFrame.width}
+                    height={selectedMaskFrame.height}
+                  />
+                )}
+              </Layer>
+            )}
           </Stage>
         </div>
       </section>
@@ -231,16 +238,18 @@ export function KonvaWorkspace({ pieces, selectedPieceId, texture, textureUrl, o
                   onSelect={() => onSelectPiece(piece.id)}
                 />
               ))}
-            <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
-              {pieces.map((piece) => (
-                <PieceOutline
-                  key={`outline-${piece.id}`}
-                  piece={piece}
-                  selected={piece.id === selectedPieceId}
-                  onSelect={() => onSelectPiece(piece.id)}
-                />
-              ))}
-            </Layer>
+            {showOutlines && (
+              <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
+                {pieces.map((piece) => (
+                  <PieceOutline
+                    key={`outline-${piece.id}`}
+                    piece={piece}
+                    selected={piece.id === selectedPieceId}
+                    onSelect={() => onSelectPiece(piece.id)}
+                  />
+                ))}
+              </Layer>
+            )}
           </Stage>
         </div>
       </section>
