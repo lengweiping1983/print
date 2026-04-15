@@ -201,7 +201,20 @@ def import_template(project_id: str, asset_id: str = Form(...)) -> dict:
                     now_iso(),
                 ),
             )
-    return {"pieces": list_pieces(project_id), "template_source": template_source, "template_path": rel_path(template_path)}
+    stored_pieces = raw_pieces(project_id)
+    design_canvas = build_design_canvas_config(stored_pieces, {"garment_type": "unknown"})
+    design_canvas = carry_existing_design_canvas(project_id, design_canvas)
+    mappings = auto_map_pieces(stored_pieces, design_canvas, "unknown")
+    apply_piece_mappings(project_id, stored_pieces, mappings)
+    update_project_design_canvas(project_id, design_canvas)
+    return {
+        "pieces": list_pieces(project_id),
+        "template_source": template_source,
+        "template_path": rel_path(template_path),
+        "design_canvas": design_canvas,
+        "mappings": mappings,
+        "warnings": _mapping_warnings(mappings),
+    }
 
 
 @app.get("/api/projects/{project_id}/pieces", response_model=list[PieceOut])

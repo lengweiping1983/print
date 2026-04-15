@@ -56,6 +56,8 @@ def test_jpeg_layout_image_import_creates_piece_masks() -> None:
         assert imported["template_source"] == "layout_image"
         assert imported["template_path"].endswith("_template.png")
         assert len(imported["pieces"]) == 2
+        assert imported["design_canvas"]["width"] > 0
+        assert all(piece["transform"]["mode"] == "global_canvas" for piece in imported["pieces"])
         for piece in imported["pieces"]:
             assert storage_path(piece["mask_path"]).exists()
         marker_paths = [marker_path_for_mask(storage_path(piece["mask_path"])) for piece in imported["pieces"]]

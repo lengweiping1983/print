@@ -52,7 +52,9 @@ export function StudioPage() {
   const [designCanvas, setDesignCanvas] = useState<DesignCanvas | null>(null);
   const [selectedLayerId, setSelectedLayerId] = useState("");
   const [layersDirty, setLayersDirty] = useState(false);
+  const [autoRenderingDesign, setAutoRenderingDesign] = useState(false);
   const prevJobRef = useRef<Job | null>(null);
+  const layerRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     api
@@ -106,10 +108,22 @@ export function StudioPage() {
     : "";
   const workspaceTextureUrl = activeTexture?.design_canvas_url || selectedInputTextureUrl;
   const recommendationLabel = activeTexture?.fit_source_recommendation === "seamless" ? "使用无缝图适配" : "使用原图适配";
+  const canUseLayers = Boolean(designCanvas && activeTexture?.design_canvas_url);
   const globalPieceCount = pieces.filter((piece) => piece.transform.mode === "global_canvas" && piece.transform.global_enabled !== false).length;
   const designLayers = designCanvas?.layers || [];
   const selectedLayer = designLayers.find((layer) => layer.id === selectedLayerId) || designLayers[0] || null;
   const safetyReport = designCanvas?.safety_report || [];
+
+  useEffect(() => {
+    if (!layersDirty || !project || !activeTexture || autoRenderingDesign) return;
+    if (layerRenderTimerRef.current) clearTimeout(layerRenderTimerRef.current);
+    layerRenderTimerRef.current = setTimeout(() => {
+      void regenerateDesignCanvas({ silent: true });
+    }, 800);
+    return () => {
+      if (layerRenderTimerRef.current) clearTimeout(layerRenderTimerRef.current);
+    };
+  }, [layersDirty, project?.id, activeTexture?.id, autoRenderingDesign, designLayers]);
 
   async function upload(kind: string, file: File) {
     if (!project) return;
@@ -130,7 +144,9 @@ export function StudioPage() {
       const imported = await api.importTemplate(project.id, asset.id);
       setPieces(imported.pieces);
       setSelectedPieceId(imported.pieces[0]?.id ?? "");
-      setNotice(`模板解析完成，共 ${imported.pieces.length} 个裁片。`);
+      if (imported.design_canvas) setDesignCanvas(imported.design_canvas);
+      const warningText = imported.warnings?.length ? `，${imported.warnings.length} 个部位需要复核` : "";
+      setNotice(`模板解析完成，已自动识别部位并建立全局映射，共 ${imported.pieces.length} 个裁片${warningText}。`);
     } catch (error) {
       setNotice(readError(error));
     }
@@ -236,8 +252,8 @@ export function StudioPage() {
   }
 
   async function addImageLayer() {
-    if (!designCanvas) {
-      setNotice("请先识别裁片或自动适配纹理，建立全局设计画布。");
+    if (!canUseLayers || !designCanvas) {
+      setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
       return;
     }
     const asset = assets.find((item) => item.kind === "pattern" || item.kind === "garment_photo");
@@ -252,8 +268,8 @@ export function StudioPage() {
   }
 
   async function addTextLayer() {
-    if (!designCanvas) {
-      setNotice("请先识别裁片或自动适配纹理，建立全局设计画布。");
+    if (!canUseLayers || !designCanvas) {
+      setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
       return;
     }
     const layer = createLayer("text", designCanvas);
@@ -276,10 +292,11 @@ export function StudioPage() {
     await saveDesignCanvas(next);
   }
 
-  async function regenerateDesignCanvas() {
+  async function regenerateDesignCanvas(options: { silent?: boolean } = {}) {
     if (!project || !activeTexture) return;
     try {
-      setNotice("正在按图层重新生成全局设计画布...");
+      setAutoRenderingDesign(true);
+      if (!options.silent) setNotice("正在更新预览和导出画布...");
       const created = await api.renderDesignCanvas(project.id, activeTexture.id);
       const done = await waitForJob(created.job_id, setJob);
       const texture = done.output.texture as Texture;
@@ -289,14 +306,16 @@ export function StudioPage() {
       setLayersDirty(false);
     } catch (error) {
       setNotice(readError(error));
+    } finally {
+      setAutoRenderingDesign(false);
     }
   }
 
   async function exportPack() {
     if (!project) return;
     try {
-      if (layersDirty) {
-        setNotice("图层已修改，建议先点击“重新生成设计画布”；本次仍会继续导出。");
+      if (layersDirty && activeTexture) {
+        await regenerateDesignCanvas({ silent: true });
       }
       setNotice("正在导出打样包...");
       const created = await api.exportProject(project.id);
@@ -414,23 +433,28 @@ export function StudioPage() {
                   <option value="t_shirt">T 恤</option>
                   <option value="shirt">衬衫</option>
                 </select>
+                <span className="text-xs leading-5 text-slate-500">帮助系统识别前片、后片、袖片；不确定就选未知，后面仍可手动调整。</span>
               </label>
               <label className="grid gap-1">
                 <span className="font-semibold">全局纹理方向：{textureAngle}°</span>
                 <input type="range" min="-180" max="180" value={textureAngle} onChange={(event) => setTextureAngle(Number(event.target.value))} />
+                <span className="text-xs leading-5 text-slate-500">控制整件衣服上的纹理角度；不调就是按原图方向铺开。</span>
               </label>
               <label className="grid gap-1">
                 <span className="font-semibold">纹理缩放：{globalTextureScale.toFixed(2)}</span>
                 <input type="range" min="0.2" max="4" step="0.05" value={globalTextureScale} onChange={(event) => setGlobalTextureScale(Number(event.target.value))} />
+                <span className="text-xs leading-5 text-slate-500">控制花纹大小和密度；不调会保持原始比例，通常适合先看整体效果。</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
                 <label className="grid gap-1 text-sm">
                   <span className="font-semibold">偏移 X: {globalOffsetX}</span>
                   <input type="range" min="-2048" max="2048" step="1" value={globalOffsetX} onChange={(event) => setGlobalOffsetX(Number(event.target.value))} />
+                  <span className="text-xs leading-5 text-slate-500">左右移动整张纹理。</span>
                 </label>
                 <label className="grid gap-1 text-sm">
                   <span className="font-semibold">偏移 Y: {globalOffsetY}</span>
                   <input type="range" min="-2048" max="2048" step="1" value={globalOffsetY} onChange={(event) => setGlobalOffsetY(Number(event.target.value))} />
+                  <span className="text-xs leading-5 text-slate-500">上下移动整张纹理。</span>
                 </label>
               </div>
               <label className="grid gap-1">
@@ -439,6 +463,7 @@ export function StudioPage() {
                   <option value="continuous">连续统一</option>
                   <option value="mirror">左右镜像</option>
                 </select>
+                <span className="text-xs leading-5 text-slate-500">连续统一适合水纹、迷彩、花纹；左右镜像适合需要对称的左右片。</span>
               </label>
               <label className="grid gap-1">
                 <span className="font-semibold">主视觉中心</span>
@@ -450,15 +475,17 @@ export function StudioPage() {
                   <option value="hem_center">下摆中心</option>
                   <option value="sleeve_center">袖中线</option>
                 </select>
+                <span className="text-xs leading-5 text-slate-500">决定 logo、鱼、文字等主体优先对齐的位置；满版纹理影响较小。</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
                 <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={handleAutoMap}>
-                  识别裁片
+                  重新识别部位
                 </button>
                 <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || pieces.length === 0} onClick={handleGlobalFit}>
                   自动适配纹理
                 </button>
               </div>
+              <p className="m-0 text-xs leading-5 text-slate-500">上传模板时已自动拆片并识别部位；这里不会重新拆模板，只会重建前片、后片、袖片等全局取样区域。</p>
               <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
                 已启用全局坐标：{globalPieceCount}/{pieces.length} 个裁片。水纹、迷彩和花纹建议使用连续统一；logo、鱼和文字先按主视觉中心定位，再人工微调。
               </p>
@@ -468,14 +495,18 @@ export function StudioPage() {
           <Panel title="图层">
             <div className="grid gap-3 text-sm">
               <div className="grid grid-cols-2 gap-2">
-                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={addImageLayer}>
+                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addImageLayer}>
                   添加图片层
                 </button>
-                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={addTextLayer}>
+                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
                   添加文字层
                 </button>
               </div>
-              {designLayers.length === 0 && <p className="m-0 text-xs leading-5 text-slate-500">建立全局设计画布后，可添加 logo、主图或号码文字。</p>}
+              {designLayers.length === 0 && (
+                <p className="m-0 text-xs leading-5 text-slate-500">
+                  先完成“自动适配纹理”，生成全局设计画布后，可添加 logo、主图或号码文字。
+                </p>
+              )}
               <div className="grid gap-2">
                 {designLayers.map((layer) => (
                   <button
@@ -496,10 +527,14 @@ export function StudioPage() {
                   onDelete={() => deleteLayer(selectedLayer.id)}
                 />
               )}
-              <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || !designCanvas} onClick={regenerateDesignCanvas}>
-                重新生成设计画布
+              <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || !designCanvas || autoRenderingDesign} onClick={() => regenerateDesignCanvas()}>
+                {autoRenderingDesign ? "正在更新预览" : "立即更新预览"}
               </button>
-              {layersDirty && <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">图层已修改，需要重新生成设计画布后才会进入预览和导出。</p>}
+              {layersDirty && (
+                <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                  图层已保存，系统会自动更新预览和导出画布；若未刷新，可点击立即更新。
+                </p>
+              )}
               <SafetyReportList report={safetyReport} />
             </div>
           </Panel>
@@ -816,7 +851,7 @@ function NumberField({ label, value, step = 1, onChange }: { label: string; valu
 
 function SafetyReportList({ report }: { report: SafetyReportItem[] }) {
   if (report.length === 0) {
-    return <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">暂无安全区风险。重新生成设计画布后会更新检查结果。</p>;
+    return <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">暂无安全区风险。图层更新后会自动刷新检查结果。</p>;
   }
   return (
     <div className="grid gap-2">
