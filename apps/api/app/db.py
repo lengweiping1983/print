@@ -66,6 +66,11 @@ create table if not exists textures (
   source_type text not null,
   source_path text not null,
   seamless_path text not null default '',
+  design_canvas_path text not null default '',
+  fit_source_recommendation text not null default 'source',
+  fit_source text not null default 'source',
+  seamless_mode text not null default '',
+  analysis text not null default '{}',
   prompt text not null default '',
   provider text not null default 'local',
   model text not null default 'local',
@@ -128,9 +133,24 @@ def ensure_schema() -> None:
         con = sqlite3.connect(DB_PATH)
         try:
             con.executescript(SCHEMA_SQL)
+            ensure_texture_columns(con)
             con.commit()
         finally:
             con.close()
+
+
+def ensure_texture_columns(con: sqlite3.Connection) -> None:
+    columns = {row[1] for row in con.execute("pragma table_info(textures)").fetchall()}
+    additions = {
+        "design_canvas_path": "text not null default ''",
+        "fit_source_recommendation": "text not null default 'source'",
+        "fit_source": "text not null default 'source'",
+        "seamless_mode": "text not null default ''",
+        "analysis": "text not null default '{}'",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            con.execute(f"alter table textures add column {name} {definition}")
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:

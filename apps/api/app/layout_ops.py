@@ -69,6 +69,8 @@ def build_design_canvas_config(
             "hem_center": {"x": width * 0.3, "y": height * 0.72},
             "sleeve_center": {"x": width * 0.5, "y": height * 0.72},
         },
+        "layers": payload.get("layers") or [],
+        "safety_report": payload.get("safety_report") or [],
         "size_mapping": {},
     }
 
@@ -120,6 +122,8 @@ def auto_map_pieces(
 def merge_mapping_into_transform(transform: dict[str, Any], mapping: dict[str, Any]) -> dict[str, Any]:
     region = mapping["design_region"]
     next_transform = dict(transform or {})
+    role_confirmed = bool(next_transform.get("role_confirmed", False))
+    piece_role = next_transform.get("piece_role") if role_confirmed else mapping["piece_role"]
     next_transform.update(
         {
             "mode": "global_canvas",
@@ -131,7 +135,11 @@ def merge_mapping_into_transform(transform: dict[str, Any], mapping: dict[str, A
             "mirror_x": bool(region["mirror_x"]),
             "mirror_y": bool(region["mirror_y"]),
             "grainline_angle": mapping["grainline_angle"],
-            "piece_role": mapping["piece_role"],
+            "piece_role": piece_role or mapping["piece_role"],
+            "role_confirmed": role_confirmed,
+            "global_enabled": bool(next_transform.get("global_enabled", True)),
+            "safe_zones": mapping.get("safe_zones", []),
+            "avoid_zones": mapping.get("avoid_zones", []),
             "fit_confidence": mapping["fit_confidence"],
             "fit_note": mapping["fit_note"],
         }

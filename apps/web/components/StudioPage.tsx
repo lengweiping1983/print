@@ -1,6 +1,6 @@
 "use client";
 
-import type { Asset, GlobalFitOptions, Job, Piece, PieceTransform, Project, Texture } from "@print-studio/shared-types";
+import type { Asset, DesignCanvas, DesignLayer, GlobalFitOptions, Job, Piece, PieceTransform, Project, SafetyReportItem, Texture } from "@print-studio/shared-types";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, waitForJob } from "@/lib/api";
@@ -49,6 +49,9 @@ export function StudioPage() {
   const [globalOffsetY, setGlobalOffsetY] = useState(0);
   const [globalSymmetry, setGlobalSymmetry] = useState<"continuous" | "mirror">("continuous");
   const [globalAnchor, setGlobalAnchor] = useState("front_center");
+  const [designCanvas, setDesignCanvas] = useState<DesignCanvas | null>(null);
+  const [selectedLayerId, setSelectedLayerId] = useState("");
+  const [layersDirty, setLayersDirty] = useState(false);
   const prevJobRef = useRef<Job | null>(null);
 
   useEffect(() => {
@@ -56,6 +59,7 @@ export function StudioPage() {
       .createProject()
       .then((created) => {
         setProject(created);
+        setDesignCanvas(readDesignCanvas(created));
         setNotice("项目已创建，先上传透明 PNG/WebP 裁片模板或白底排版原图。");
       })
       .catch((error) => setNotice(error.message));
@@ -95,12 +99,17 @@ export function StudioPage() {
   }, [assets]);
   const activeTexture = textures[0] ?? null;
   const hasSeamlessTexture = Boolean(activeTexture?.seamless_url);
-  const activeTextureUrl = activeTexture
+  const selectedInputTextureUrl = activeTexture
     ? textureViewMode === "seamless" && activeTexture.seamless_url
       ? activeTexture.seamless_url
       : activeTexture.source_url
     : "";
-  const globalPieceCount = pieces.filter((piece) => piece.transform.mode === "global_canvas").length;
+  const workspaceTextureUrl = activeTexture?.design_canvas_url || selectedInputTextureUrl;
+  const recommendationLabel = activeTexture?.fit_source_recommendation === "seamless" ? "使用无缝图适配" : "使用原图适配";
+  const globalPieceCount = pieces.filter((piece) => piece.transform.mode === "global_canvas" && piece.transform.global_enabled !== false).length;
+  const designLayers = designCanvas?.layers || [];
+  const selectedLayer = designLayers.find((layer) => layer.id === selectedLayerId) || designLayers[0] || null;
+  const safetyReport = designCanvas?.safety_report || [];
 
   async function upload(kind: string, file: File) {
     if (!project) return;
@@ -141,8 +150,7 @@ export function StudioPage() {
       const done = await waitForJob(created.job_id, setJob);
       const texture = done.output.texture as Texture;
       setTextures((current) => [texture, ...current]);
-      setTextureViewMode("source");
-      setNotice("纹理已生成，可继续做无缝化或直接导出。");
+      setTextureViewMode(texture.fit_source || texture.fit_source_recommendation || "source");
     } catch (error) {
       setNotice(readError(error));
     }
@@ -157,7 +165,6 @@ export function StudioPage() {
       const texture = done.output.texture as Texture;
       setTextures((current) => [texture, ...current.filter((item) => item.id !== texture.id)]);
       setTextureViewMode("seamless");
-      setNotice("无缝大布料图已生成。");
     } catch (error) {
       setNotice(readError(error));
     }
@@ -170,7 +177,7 @@ export function StudioPage() {
       const created = await api.autoMapLayout(project.id, garmentType);
       const done = await waitForJob(created.job_id, setJob);
       setPieces((done.output.pieces as Piece[]) ?? (await api.listPieces(project.id)));
-      setNotice("裁片已映射到全局设计画布，可继续适配纹理。");
+      if (done.output.design_canvas) setDesignCanvas(done.output.design_canvas as DesignCanvas);
     } catch (error) {
       setNotice(readError(error));
     }
@@ -189,15 +196,17 @@ export function StudioPage() {
         tile: true,
         mirror: globalSymmetry === "mirror",
         symmetry: globalSymmetry,
-        anchor: globalAnchor
+        anchor: globalAnchor,
+        texture_source: textureViewMode
       };
       const created = await api.fitGlobalTexture(project.id, activeTexture.id, options);
       const done = await waitForJob(created.job_id, setJob);
       const texture = done.output.texture as Texture;
       setTextures((current) => [texture, ...current.filter((item) => item.id !== texture.id)]);
       setPieces((done.output.pieces as Piece[]) ?? (await api.listPieces(project.id)));
-      setTextureViewMode("seamless");
-      setNotice("全局一致适配已完成，可切换到设计画布查看裁片取样区域。");
+      if (done.output.design_canvas) setDesignCanvas(done.output.design_canvas as DesignCanvas);
+      setTextureViewMode(texture.fit_source || textureViewMode);
+      setLayersDirty(false);
     } catch (error) {
       setNotice(readError(error));
     }
@@ -218,15 +227,82 @@ export function StudioPage() {
     setPieces((current) => current.map((piece) => (piece.id === saved.id ? saved : piece)));
   }
 
+  async function saveDesignCanvas(next: DesignCanvas, dirty = true) {
+    if (!project) return;
+    setDesignCanvas(next);
+    setLayersDirty(dirty);
+    const saved = await api.updateDesignCanvas(project.id, next);
+    setDesignCanvas(saved.design_canvas);
+  }
+
+  async function addImageLayer() {
+    if (!designCanvas) {
+      setNotice("请先识别裁片或自动适配纹理，建立全局设计画布。");
+      return;
+    }
+    const asset = assets.find((item) => item.kind === "pattern" || item.kind === "garment_photo");
+    if (!asset) {
+      setNotice("请先上传一张图案或衣服照片，再添加图片层。");
+      return;
+    }
+    const layer = createLayer("image", designCanvas, asset);
+    const next = { ...designCanvas, layers: [...designLayers, layer] };
+    setSelectedLayerId(layer.id);
+    await saveDesignCanvas(next);
+  }
+
+  async function addTextLayer() {
+    if (!designCanvas) {
+      setNotice("请先识别裁片或自动适配纹理，建立全局设计画布。");
+      return;
+    }
+    const layer = createLayer("text", designCanvas);
+    const next = { ...designCanvas, layers: [...designLayers, layer] };
+    setSelectedLayerId(layer.id);
+    await saveDesignCanvas(next);
+  }
+
+  async function patchLayer(layerId: string, update: Partial<DesignLayer>) {
+    if (!designCanvas) return;
+    const next = { ...designCanvas, layers: designLayers.map((layer) => (layer.id === layerId ? { ...layer, ...update } : layer)) };
+    await saveDesignCanvas(next);
+  }
+
+  async function deleteLayer(layerId: string) {
+    if (!designCanvas) return;
+    const nextLayers = designLayers.filter((layer) => layer.id !== layerId);
+    const next = { ...designCanvas, layers: nextLayers };
+    setSelectedLayerId(nextLayers[0]?.id || "");
+    await saveDesignCanvas(next);
+  }
+
+  async function regenerateDesignCanvas() {
+    if (!project || !activeTexture) return;
+    try {
+      setNotice("正在按图层重新生成全局设计画布...");
+      const created = await api.renderDesignCanvas(project.id, activeTexture.id);
+      const done = await waitForJob(created.job_id, setJob);
+      const texture = done.output.texture as Texture;
+      setTextures((current) => [texture, ...current.filter((item) => item.id !== texture.id)]);
+      setTextureViewMode("seamless");
+      if (done.output.design_canvas) setDesignCanvas(done.output.design_canvas as DesignCanvas);
+      setLayersDirty(false);
+    } catch (error) {
+      setNotice(readError(error));
+    }
+  }
+
   async function exportPack() {
     if (!project) return;
     try {
+      if (layersDirty) {
+        setNotice("图层已修改，建议先点击“重新生成设计画布”；本次仍会继续导出。");
+      }
       setNotice("正在导出打样包...");
       const created = await api.exportProject(project.id);
       const done = await waitForJob(created.job_id, setJob);
       const url = String(done.output.export_url || "");
       if (url) window.open(url, "_blank", "noopener,noreferrer");
-      setNotice(url ? `打样包已生成：${url}` : "打样包已生成。");
       await refreshTextures(project.id);
     } catch (error) {
       setNotice(readError(error));
@@ -287,8 +363,11 @@ export function StudioPage() {
           <Panel title="纹理">
             {activeTexture ? (
               <div className="space-y-3">
-                <img className="checkerboard h-48 w-full rounded-lg object-contain" src={activeTextureUrl} alt="当前纹理" />
+                <img className="checkerboard h-48 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前纹理" />
                 <p className="m-0 text-xs text-slate-500">纹理大小：{activeTexture.width} x {activeTexture.height}</p>
+                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
+                  系统建议：{recommendationLabel}。{readAnalysisReason(activeTexture.analysis)}
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     className={`rounded-lg px-3 py-2 text-sm font-semibold ring-1 ring-line ${
@@ -309,7 +388,7 @@ export function StudioPage() {
                   </button>
                 </div>
                 <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-                  当前使用：{textureViewMode === "seamless" && hasSeamlessTexture ? "无缝图" : "原图"}。无缝处理适合满版纹理；透明底主体图案建议使用原图定位。
+                  当前适配输入：{textureViewMode === "seamless" && hasSeamlessTexture ? "无缝图" : "原图"}。无缝处理适合满版纹理；透明底主体图案建议使用原图定位。
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={() => handleSeamless("mirror")}>
@@ -323,7 +402,7 @@ export function StudioPage() {
             ) : (
               <p className="text-sm text-slate-500">上传图案或使用 Prompt 生成纹理。</p>
             )}
-            <div className="mt-4 rounded-lg bg-mist p-3 text-sm text-slate-600">{notice}</div>
+
           </Panel>
 
           <Panel title="全局适配">
@@ -385,6 +464,45 @@ export function StudioPage() {
               </p>
             </div>
           </Panel>
+
+          <Panel title="图层">
+            <div className="grid gap-3 text-sm">
+              <div className="grid grid-cols-2 gap-2">
+                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={addImageLayer}>
+                  添加图片层
+                </button>
+                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={addTextLayer}>
+                  添加文字层
+                </button>
+              </div>
+              {designLayers.length === 0 && <p className="m-0 text-xs leading-5 text-slate-500">建立全局设计画布后，可添加 logo、主图或号码文字。</p>}
+              <div className="grid gap-2">
+                {designLayers.map((layer) => (
+                  <button
+                    key={layer.id}
+                    className={`rounded-lg border px-3 py-2 text-left ${layer.id === selectedLayerId ? "border-jade bg-emerald-50" : "border-line bg-white"}`}
+                    onClick={() => setSelectedLayerId(layer.id)}
+                  >
+                    <span className="block font-semibold">{layer.name}</span>
+                    <span className="text-xs text-slate-500">{layer.type === "image" ? "图片层" : "文字层"} · {layer.visible ? "显示" : "隐藏"} · {layer.locked ? "锁定" : "可编辑"}</span>
+                  </button>
+                ))}
+              </div>
+              {selectedLayer && (
+                <LayerEditor
+                  layer={selectedLayer}
+                  pieces={pieces}
+                  onChange={(update) => patchLayer(selectedLayer.id, update)}
+                  onDelete={() => deleteLayer(selectedLayer.id)}
+                />
+              )}
+              <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || !designCanvas} onClick={regenerateDesignCanvas}>
+                重新生成设计画布
+              </button>
+              {layersDirty && <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">图层已修改，需要重新生成设计画布后才会进入预览和导出。</p>}
+              <SafetyReportList report={safetyReport} />
+            </div>
+          </Panel>
         </aside>
 
         <section className="grid grid-cols-[128px_minmax(0,1fr)] gap-4 max-[980px]:grid-cols-1">
@@ -412,7 +530,7 @@ export function StudioPage() {
             <SinglePieceCalibration
               pieces={pieces}
               selectedPieceId={selectedPieceId}
-              textureUrl={activeTextureUrl}
+              textureUrl={workspaceTextureUrl}
               showOutlines={showOutlines}
               outlineWidth={outlineWidth}
               onToggleOutlines={setShowOutlines}
@@ -434,14 +552,46 @@ export function StudioPage() {
                     <>
                       <Range label="全局 X" value={selectedPiece.transform.design_x ?? 0} min={0} max={4096} onChange={(value) => patchSelected({ design_x: value })} />
                       <Range label="全局 Y" value={selectedPiece.transform.design_y ?? 0} min={0} max={4096} onChange={(value) => patchSelected({ design_y: value })} />
+                      <Range label="取样宽" value={selectedPiece.transform.design_width ?? selectedPiece.width} min={24} max={4096} onChange={(value) => patchSelected({ design_width: value })} />
+                      <Range label="取样高" value={selectedPiece.transform.design_height ?? selectedPiece.height} min={24} max={4096} onChange={(value) => patchSelected({ design_height: value })} />
                     </>
                   )}
+                  <label className="grid gap-1 text-sm font-semibold">
+                    <span>裁片角色</span>
+                    <select className="rounded-lg border border-line bg-white px-3 py-2" value={selectedPiece.transform.piece_role || "unknown"} onChange={(event) => patchSelected({ piece_role: event.target.value, role_confirmed: true })}>
+                      {Object.entries(PIECE_ROLE_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold">
+                    <span>配对编号</span>
+                    <input className="rounded-lg border border-line px-3 py-2" value={selectedPiece.transform.pair_id || ""} onChange={(event) => patchSelected({ pair_id: event.target.value })} placeholder="例如 pair_front" />
+                  </label>
+                  <label className="grid gap-1 text-sm font-semibold">
+                    <span>配对方向</span>
+                    <select className="rounded-lg border border-line bg-white px-3 py-2" value={selectedPiece.transform.pair_side || ""} onChange={(event) => patchSelected({ pair_side: event.target.value as PieceTransform["pair_side"] })}>
+                      <option value="">未设置</option>
+                      <option value="left">左</option>
+                      <option value="right">右</option>
+                      <option value="none">无配对</option>
+                    </select>
+                  </label>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <label className="rounded-lg border border-line p-2">
                       <input type="checkbox" checked={selectedPiece.transform.mirror_x} onChange={(event) => patchSelected({ mirror_x: event.target.checked })} /> 左右镜像
                     </label>
                     <label className="rounded-lg border border-line p-2">
                       <input type="checkbox" checked={selectedPiece.transform.mirror_y} onChange={(event) => patchSelected({ mirror_y: event.target.checked })} /> 上下镜像
+                    </label>
+                    <label className="rounded-lg border border-line p-2">
+                      <input type="checkbox" checked={Boolean(selectedPiece.transform.role_confirmed)} onChange={(event) => patchSelected({ role_confirmed: event.target.checked })} /> 人工确认
+                    </label>
+                    <label className="rounded-lg border border-line p-2">
+                      <input type="checkbox" checked={selectedPiece.transform.global_enabled ?? true} onChange={(event) => patchSelected({ global_enabled: event.target.checked })} /> 参与全局
+                    </label>
+                    <label className="rounded-lg border border-line p-2">
+                      <input type="checkbox" checked={selectedPiece.transform.locked} onChange={(event) => patchSelected({ locked: event.target.checked })} /> 锁定裁片
                     </label>
                   </div>
                   <button className="rounded-lg bg-white px-4 py-2 font-semibold text-ink ring-1 ring-line" onClick={() => patchSelected(emptyTransform)}>
@@ -464,10 +614,21 @@ export function StudioPage() {
         <LayoutPreview
           pieces={pieces}
           selectedPieceId={selectedPieceId}
-          textureUrl={activeTextureUrl}
+          textureUrl={workspaceTextureUrl}
+          designCanvas={designCanvas}
+          selectedLayerId={selectedLayerId}
           showOutlines={showOutlines}
           outlineWidth={outlineWidth}
           onSelectPiece={setSelectedPieceId}
+          onSelectLayer={setSelectedLayerId}
+          onMoveDesignRegion={(piece, update) => {
+            setSelectedPieceId(piece.id);
+            void patchPiece(piece.id, update);
+          }}
+          onMoveLayer={(layer, update) => {
+            setSelectedLayerId(layer.id);
+            void patchLayer(layer.id, update);
+          }}
         />
       </div>
       <ToastNotice notice={notice} job={job} />
@@ -512,6 +673,162 @@ function readError(error: unknown) {
   return error instanceof Error ? error.message.split("\n")[0] : "操作失败，请检查后端日志。";
 }
 
+function readAnalysisReason(analysis: Record<string, unknown>) {
+  const reasons = Array.isArray(analysis.reasons) ? analysis.reasons : [];
+  const first = reasons.find((reason) => typeof reason === "string");
+  return first ? String(first) : "系统会按图案特征自动选择适配输入。";
+}
+
+function readDesignCanvas(project: Project): DesignCanvas | null {
+  const canvas = (project.export_config as { design_canvas?: DesignCanvas }).design_canvas;
+  return canvas || null;
+}
+
+function createLayer(type: "image" | "text", designCanvas: DesignCanvas, asset?: Asset): DesignLayer {
+  const anchor = designCanvas.design_anchors?.[designCanvas.anchor] || { x: designCanvas.width / 2, y: designCanvas.height / 2 };
+  const id = `layer_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  if (type === "image") {
+    const width = Math.min(520, Math.max(180, asset?.width || 360));
+    const height = Math.min(520, Math.max(180, asset?.height || 360));
+    return {
+      id,
+      type,
+      name: asset?.filename || "图片层",
+      visible: true,
+      locked: false,
+      anchor: designCanvas.anchor,
+      x: Math.round(anchor.x - width / 2),
+      y: Math.round(anchor.y - height / 2),
+      width,
+      height,
+      rotation: 0,
+      opacity: 1,
+      target_roles: [],
+      asset_id: asset?.id || "",
+      source_url: asset?.url || ""
+    };
+  }
+  return {
+    id,
+    type,
+    name: "文字层",
+    visible: true,
+    locked: false,
+    anchor: designCanvas.anchor,
+    x: Math.round(anchor.x - 160),
+    y: Math.round(anchor.y - 80),
+    width: 320,
+    height: 160,
+    rotation: 0,
+    opacity: 1,
+    target_roles: [],
+    content: "23",
+    font_size: 120,
+    font_weight: "700",
+    fill: "#ffffff",
+    stroke: "#111111",
+    stroke_width: 6
+  };
+}
+
+function LayerEditor({
+  layer,
+  pieces,
+  onChange,
+  onDelete
+}: {
+  layer: DesignLayer;
+  pieces: Piece[];
+  onChange: (update: Partial<DesignLayer>) => void;
+  onDelete: () => void;
+}) {
+  const roles = Array.from(new Set(pieces.map((piece) => piece.transform.piece_role).filter(Boolean))) as string[];
+  return (
+    <div className="grid gap-3 rounded-lg border border-line p-3">
+      <label className="grid gap-1 text-sm font-semibold">
+        <span>图层名称</span>
+        <input className="rounded-lg border border-line px-3 py-2" value={layer.name} onChange={(event) => onChange({ name: event.target.value })} />
+      </label>
+      {layer.type === "text" && (
+        <label className="grid gap-1 text-sm font-semibold">
+          <span>文字内容</span>
+          <input className="rounded-lg border border-line px-3 py-2" value={layer.content || ""} onChange={(event) => onChange({ content: event.target.value })} />
+        </label>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <NumberField label="X" value={layer.x} onChange={(x) => onChange({ x })} />
+        <NumberField label="Y" value={layer.y} onChange={(y) => onChange({ y })} />
+        <NumberField label="宽" value={layer.width} onChange={(width) => onChange({ width })} />
+        <NumberField label="高" value={layer.height} onChange={(height) => onChange({ height })} />
+        <NumberField label="旋转" value={layer.rotation} onChange={(rotation) => onChange({ rotation })} />
+        <NumberField label="透明度" value={layer.opacity} step={0.05} onChange={(opacity) => onChange({ opacity })} />
+      </div>
+      {layer.type === "text" && (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="字号" value={layer.font_size || 120} onChange={(font_size) => onChange({ font_size })} />
+          <NumberField label="描边" value={layer.stroke_width || 0} onChange={(stroke_width) => onChange({ stroke_width })} />
+          <label className="grid gap-1 text-xs font-semibold">
+            <span>填充色</span>
+            <input className="h-10 rounded-lg border border-line px-2" value={layer.fill || "#ffffff"} onChange={(event) => onChange({ fill: event.target.value })} />
+          </label>
+          <label className="grid gap-1 text-xs font-semibold">
+            <span>描边色</span>
+            <input className="h-10 rounded-lg border border-line px-2" value={layer.stroke || "#111111"} onChange={(event) => onChange({ stroke: event.target.value })} />
+          </label>
+        </div>
+      )}
+      <label className="grid gap-1 text-sm font-semibold">
+        <span>目标部位</span>
+        <select
+          className="rounded-lg border border-line bg-white px-3 py-2"
+          value={layer.target_roles[0] || ""}
+          onChange={(event) => onChange({ target_roles: event.target.value ? [event.target.value] : [] })}
+        >
+          <option value="">自动匹配</option>
+          {roles.map((role) => (
+            <option key={role} value={role}>{PIECE_ROLE_LABELS[role] || role}</option>
+          ))}
+        </select>
+      </label>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <label className="rounded-lg border border-line p-2">
+          <input type="checkbox" checked={layer.visible} onChange={(event) => onChange({ visible: event.target.checked })} /> 显示
+        </label>
+        <label className="rounded-lg border border-line p-2">
+          <input type="checkbox" checked={layer.locked} onChange={(event) => onChange({ locked: event.target.checked })} /> 锁定
+        </label>
+      </div>
+      <button className="rounded-lg bg-white px-3 py-2 font-semibold text-coral ring-1 ring-line" onClick={onDelete}>
+        删除图层
+      </button>
+    </div>
+  );
+}
+
+function NumberField({ label, value, step = 1, onChange }: { label: string; value: number; step?: number; onChange: (value: number) => void }) {
+  return (
+    <label className="grid gap-1 text-xs font-semibold">
+      <span>{label}</span>
+      <input className="rounded-lg border border-line px-2 py-2" type="number" step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+    </label>
+  );
+}
+
+function SafetyReportList({ report }: { report: SafetyReportItem[] }) {
+  if (report.length === 0) {
+    return <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">暂无安全区风险。重新生成设计画布后会更新检查结果。</p>;
+  }
+  return (
+    <div className="grid gap-2">
+      {report.map((item, index) => (
+        <div key={`${item.layer_id}-${index}`} className={`rounded-lg p-3 text-xs leading-5 ${item.level === "ok" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}>
+          <strong>{item.layer_name}</strong>：{item.message}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
@@ -524,7 +841,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 function SinglePieceLoading() {
   return (
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
-      <h2 className="m-0 text-lg font-semibold">单片校正</h2>
+      <h2 className="m-0 text-lg font-semibold">单裁片校正</h2>
       <p className="m-0 mt-1 text-sm text-slate-500">画布组件加载中...</p>
       <div className="checkerboard mt-3 flex h-[640px] items-center justify-center rounded-lg border border-line text-sm text-slate-500">
         正在准备裁片画布

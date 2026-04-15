@@ -16,7 +16,10 @@ export const JOB_TYPE_LABELS: Record<string, string> = {
   render_preview: "预览渲染",
   export_render: "导出渲染",
   auto_map_layout: "自动排版",
+  layout_auto_map: "自动排版",
   fit_global_texture: "全局适配",
+  texture_fit_global: "全局适配",
+  design_canvas_render: "设计画布生成",
 };
 
 export const JOB_STATUS_LABELS: Record<string, string> = {

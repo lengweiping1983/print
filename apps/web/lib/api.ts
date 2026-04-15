@@ -1,4 +1,4 @@
-import type { Asset, GlobalFitOptions, Job, Piece, PieceTransform, Project, Texture } from "@print-studio/shared-types";
+import type { Asset, DesignCanvas, GlobalFitOptions, Job, Piece, PieceTransform, Project, Texture } from "@print-studio/shared-types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
@@ -40,6 +40,13 @@ export const api = {
       body: JSON.stringify(transform)
     });
   },
+  updateDesignCanvas(projectId: string, designCanvas: Partial<DesignCanvas>) {
+    return request<{ design_canvas: DesignCanvas }>(`/api/projects/${projectId}/design-canvas`, {
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify({ design_canvas: designCanvas })
+    });
+  },
   generateTexture(projectId: string, sourceAssetId: string, sourceType: "pattern" | "garment_photo" | "ai" | "library", prompt: string) {
     return request<{ job_id: string }>(`/api/projects/${projectId}/textures/generate`, {
       method: "POST",
@@ -72,6 +79,11 @@ export const api = {
       method: "POST",
       headers: jsonHeaders,
       body: JSON.stringify({ ...options, strategy: "continuous_unified_v1", apply: true })
+    });
+  },
+  renderDesignCanvas(projectId: string, textureId: string) {
+    return request<{ job_id: string }>(`/api/projects/${projectId}/textures/${textureId}/design-canvas/render`, {
+      method: "POST"
     });
   },
   listTextures(projectId: string) {

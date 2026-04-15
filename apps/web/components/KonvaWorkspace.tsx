@@ -1,6 +1,6 @@
 "use client";
 
-import type { Piece } from "@print-studio/shared-types";
+import type { DesignCanvas, DesignLayer, DesignRect, Piece } from "@print-studio/shared-types";
 import { PIECE_ROLE_LABELS } from "@/lib/labels";
 import "konva/lib/shapes/Image.js";
 import "konva/lib/shapes/Rect.js";
@@ -163,7 +163,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h2 className="m-0 text-lg font-semibold">单片校正</h2>
+          <h2 className="m-0 text-lg font-semibold">单裁片校正</h2>
           <p className="m-0 mt-1 text-sm text-slate-500">拖动裁片中的布料，微调重点花位。</p>
         </div>
         <div className="flex items-center gap-2">
@@ -176,7 +176,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
           </label>
           {showOutlines && (
             <select
-              className="rounded-lg border border-line bg-white px-1.5 py-1 text-xs font-semibold text-ink"
+              className="rounded-lg border border-line bg-white px-2 py-1.5 text-sm font-semibold text-ink"
               value={outlineWidth}
               onChange={(event) => onOutlineWidthChange(Number(event.target.value))}
             >
@@ -186,7 +186,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
             </select>
           )}
           <ZoomButton label="-" onClick={() => setPieceZoom((zoom) => clampZoom(zoom - 0.1))} />
-          <span className="min-w-14 rounded-md bg-mist px-2 py-1 text-center text-xs text-slate-600">{Math.round(pieceZoom * 100)}%</span>
+          <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(pieceZoom * 100)}%</span>
           <ZoomButton label="+" onClick={() => setPieceZoom((zoom) => clampZoom(zoom + 0.1))} />
         </div>
       </div>
@@ -231,23 +231,43 @@ type LayoutPreviewProps = {
   pieces: Piece[];
   selectedPieceId: string;
   textureUrl: string;
+  designCanvas?: DesignCanvas | null;
+  selectedLayerId?: string;
   showOutlines: boolean;
   outlineWidth?: number;
   onSelectPiece: (id: string) => void;
+  onSelectLayer?: (id: string) => void;
+  onMoveDesignRegion?: (piece: Piece, update: Partial<Piece["transform"]>) => void;
+  onMoveLayer?: (layer: DesignLayer, update: Partial<DesignLayer>) => void;
 };
 
-export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, onSelectPiece }: LayoutPreviewProps) {
+export function LayoutPreview({
+  pieces,
+  selectedPieceId,
+  textureUrl,
+  designCanvas,
+  selectedLayerId = "",
+  showOutlines,
+  outlineWidth = 1,
+  onSelectPiece,
+  onSelectLayer = () => {},
+  onMoveDesignRegion = () => {},
+  onMoveLayer = () => {}
+}: LayoutPreviewProps) {
   const textureImage = useLoadedImage(textureUrl);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
   const [previewMode, setPreviewMode] = useState<"layout" | "design">("layout");
   const bounds = useMemo(() => {
-    if (previewMode === "design" && textureImage) {
-      return { width: Math.max(1200, textureImage.naturalWidth), height: Math.max(760, textureImage.naturalHeight) };
+    if (previewMode === "design") {
+      return {
+        width: Math.max(1200, designCanvas?.width || textureImage?.naturalWidth || 1200),
+        height: Math.max(760, designCanvas?.height || textureImage?.naturalHeight || 760)
+      };
     }
     const width = Math.max(1200, ...pieces.map((piece) => piece.source_x + piece.width + 80), 1200);
     const height = Math.max(760, ...pieces.map((piece) => piece.source_y + piece.height + 80), 760);
     return { width, height };
-  }, [pieces, previewMode, textureImage]);
+  }, [pieces, previewMode, textureImage, designCanvas]);
   const fitZoom = useMemo(() => {
     const maxWidth = 980;
     const maxHeight = 720;
@@ -269,11 +289,11 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <span className="rounded-md bg-mist px-2 py-1 text-xs text-slate-600">{pieces.length} 个裁片</span>
+          <span className="rounded-md bg-mist px-2 py-1.5 text-sm text-slate-600">{pieces.length} 个裁片</span>
           <ZoomButton label="排版" onClick={() => setPreviewMode("layout")} />
           <ZoomButton label="设计画布" onClick={() => setPreviewMode("design")} />
           <ZoomButton label="-" onClick={() => setLayoutZoom((zoom) => clampZoom(zoom - 0.05))} />
-          <span className="min-w-14 rounded-md bg-mist px-2 py-1 text-center text-xs text-slate-600">{Math.round(layoutZoom * 100)}%</span>
+          <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(layoutZoom * 100)}%</span>
           <ZoomButton label="+" onClick={() => setLayoutZoom((zoom) => clampZoom(zoom + 0.05))} />
           <ZoomButton label="100%" onClick={() => setLayoutZoom(1)} />
         </div>
@@ -284,6 +304,19 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
             <Rect x={0} y={0} width={bounds.width} height={bounds.height} fill="#ffffff" />
             {previewMode === "design" && textureImage && <KonvaImage image={textureImage} x={0} y={0} width={bounds.width} height={bounds.height} />}
           </Layer>
+          {previewMode === "design" && (
+            <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
+              {(designCanvas?.layers || []).map((layer) => (
+                <DesignLayerNode
+                  key={layer.id}
+                  layer={layer}
+                  selected={layer.id === selectedLayerId}
+                  onSelect={() => onSelectLayer(layer.id)}
+                  onMove={(update) => onMoveLayer(layer, update)}
+                />
+              ))}
+            </Layer>
+          )}
           {previewMode === "layout" &&
             textureImage &&
             pieces.map((piece) => (
@@ -299,7 +332,14 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
           {previewMode === "design" && (
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
               {pieces.map((piece) => (
-                <DesignRegionOutline key={`design-${piece.id}`} piece={piece} selected={piece.id === selectedPieceId} outlineWidth={outlineWidth} onSelect={() => onSelectPiece(piece.id)} />
+                <DesignRegionOutline
+                  key={`design-${piece.id}`}
+                  piece={piece}
+                  selected={piece.id === selectedPieceId}
+                  outlineWidth={outlineWidth}
+                  onSelect={() => onSelectPiece(piece.id)}
+                  onChange={(update) => onMoveDesignRegion(piece, update)}
+                />
               ))}
             </Layer>
           )}
@@ -322,13 +362,32 @@ export function LayoutPreview({ pieces, selectedPieceId, textureUrl, showOutline
   );
 }
 
-function DesignRegionOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piece; selected: boolean; outlineWidth: number; onSelect: () => void }) {
+function DesignRegionOutline({
+  piece,
+  selected,
+  outlineWidth,
+  onSelect,
+  onChange
+}: {
+  piece: Piece;
+  selected: boolean;
+  outlineWidth: number;
+  onSelect: () => void;
+  onChange: (update: Partial<Piece["transform"]>) => void;
+}) {
   const x = piece.transform.design_x ?? piece.source_x;
   const y = piece.transform.design_y ?? piece.source_y;
   const width = piece.transform.design_width ?? piece.width;
   const height = piece.transform.design_height ?? piece.height;
+  const locked = Boolean(piece.transform.locked);
   return (
     <>
+      {(piece.transform.safe_zones || []).map((zone, index) => (
+        <ZoneRect key={`safe-${piece.id}-${index}`} zone={zone} piece={piece} fill="rgba(20,184,166,0.12)" stroke="rgba(20,184,166,0.55)" />
+      ))}
+      {(piece.transform.avoid_zones || []).map((zone, index) => (
+        <ZoneRect key={`avoid-${piece.id}-${index}`} zone={zone} piece={piece} fill="rgba(224,82,82,0.16)" stroke="rgba(224,82,82,0.55)" />
+      ))}
       <Rect
         x={x}
         y={y}
@@ -337,12 +396,143 @@ function DesignRegionOutline({ piece, selected, outlineWidth, onSelect }: { piec
         stroke={selected ? "#e05252" : "#2563eb"}
         strokeWidth={outlineWidth}
         dash={selected ? [] : [12, 8]}
+        draggable={selected && !locked}
         onClick={onSelect}
         onTap={onSelect}
+        onDragEnd={(event) => {
+          event.cancelBubble = true;
+          onChange({ design_x: Math.round(event.target.x()), design_y: Math.round(event.target.y()) });
+        }}
       />
       <Text x={x + 8} y={y + 8} text={(piece.transform.piece_role ? PIECE_ROLE_LABELS[piece.transform.piece_role] || piece.transform.piece_role : "") || piece.name} fill={selected ? "#e05252" : "#0f172a"} fontSize={24} onClick={onSelect} onTap={onSelect} />
+      {selected && !locked && (
+        <>
+          <ResizeHandle x={x} y={y} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "top_left", onChange)} />
+          <ResizeHandle x={x + width} y={y} cursor="nesw-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "top_right", onChange)} />
+          <ResizeHandle x={x} y={y + height} cursor="nesw-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "bottom_left", onChange)} />
+          <ResizeHandle x={x + width} y={y + height} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "bottom_right", onChange)} />
+        </>
+      )}
     </>
   );
+}
+
+function ZoneRect({ zone, piece, fill, stroke }: { zone: DesignRect; piece: Piece; fill: string; stroke: string }) {
+  const regionX = piece.transform.design_x ?? piece.source_x;
+  const regionY = piece.transform.design_y ?? piece.source_y;
+  const regionW = piece.transform.design_width ?? piece.width;
+  const regionH = piece.transform.design_height ?? piece.height;
+  const sx = regionW / Math.max(1, piece.width);
+  const sy = regionH / Math.max(1, piece.height);
+  return <Rect x={regionX + zone.x * sx} y={regionY + zone.y * sy} width={zone.width * sx} height={zone.height * sy} fill={fill} stroke={stroke} strokeWidth={1} listening={false} />;
+}
+
+function ResizeHandle({ x, y, cursor, onMove }: { x: number; y: number; cursor: string; onMove: (x: number, y: number) => void }) {
+  return (
+    <Rect
+      x={x - 7}
+      y={y - 7}
+      width={14}
+      height={14}
+      fill="#ffffff"
+      stroke="#e05252"
+      strokeWidth={2}
+      draggable
+      onMouseEnter={(event) => {
+        const stage = event.target.getStage();
+        if (stage) stage.container().style.cursor = cursor;
+      }}
+      onMouseLeave={(event) => {
+        const stage = event.target.getStage();
+        if (stage) stage.container().style.cursor = "default";
+      }}
+      onDragEnd={(event) => {
+        event.cancelBubble = true;
+        onMove(Math.round(event.target.x() + 7), Math.round(event.target.y() + 7));
+      }}
+    />
+  );
+}
+
+function onResizeRegion(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  nextX: number,
+  nextY: number,
+  corner: "top_left" | "top_right" | "bottom_left" | "bottom_right",
+  onChange: (update: Partial<Piece["transform"]>) => void
+) {
+  const minSize = 24;
+  if (corner === "top_left") {
+    const right = x + width;
+    const bottom = y + height;
+    const nx = Math.min(nextX, right - minSize);
+    const ny = Math.min(nextY, bottom - minSize);
+    onChange({ design_x: nx, design_y: ny, design_width: right - nx, design_height: bottom - ny });
+  } else if (corner === "top_right") {
+    const bottom = y + height;
+    const ny = Math.min(nextY, bottom - minSize);
+    onChange({ design_y: ny, design_width: Math.max(minSize, nextX - x), design_height: bottom - ny });
+  } else if (corner === "bottom_left") {
+    const right = x + width;
+    const nx = Math.min(nextX, right - minSize);
+    onChange({ design_x: nx, design_width: right - nx, design_height: Math.max(minSize, nextY - y) });
+  } else {
+    onChange({ design_width: Math.max(minSize, nextX - x), design_height: Math.max(minSize, nextY - y) });
+  }
+}
+
+function DesignLayerNode({ layer, selected, onSelect, onMove }: { layer: DesignLayer; selected: boolean; onSelect: () => void; onMove: (update: Partial<DesignLayer>) => void }) {
+  const image = useLoadedImage(layer.type === "image" ? layer.source_url || "" : "");
+  if (!layer.visible) return null;
+  if (layer.type === "image" && image) {
+    return (
+      <>
+        <KonvaImage
+          image={image}
+          x={layer.x}
+          y={layer.y}
+          width={layer.width}
+          height={layer.height}
+          rotation={layer.rotation}
+          opacity={layer.opacity}
+          draggable={!layer.locked}
+          onClick={onSelect}
+          onTap={onSelect}
+          onDragEnd={(event) => onMove({ x: Math.round(event.target.x()), y: Math.round(event.target.y()) })}
+        />
+        {selected && <Rect x={layer.x} y={layer.y} width={layer.width} height={layer.height} stroke="#14b8a6" strokeWidth={3} dash={[8, 6]} listening={false} />}
+      </>
+    );
+  }
+  if (layer.type === "text") {
+    return (
+      <>
+        <Text
+          x={layer.x}
+          y={layer.y}
+          width={layer.width}
+          height={layer.height}
+          text={layer.content || ""}
+          fontSize={layer.font_size || 96}
+          fontStyle={layer.font_weight === "700" ? "bold" : "normal"}
+          fill={layer.fill || "#111111"}
+          stroke={layer.stroke || ""}
+          strokeWidth={layer.stroke_width || 0}
+          rotation={layer.rotation}
+          opacity={layer.opacity}
+          draggable={!layer.locked}
+          onClick={onSelect}
+          onTap={onSelect}
+          onDragEnd={(event) => onMove({ x: Math.round(event.target.x()), y: Math.round(event.target.y()) })}
+        />
+        {selected && <Rect x={layer.x} y={layer.y} width={layer.width} height={layer.height} stroke="#14b8a6" strokeWidth={3} dash={[8, 6]} listening={false} />}
+      </>
+    );
+  }
+  return null;
 }
 
 function clampZoom(value: number) {

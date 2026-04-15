@@ -50,6 +50,12 @@ class PieceTransform(BaseModel):
     design_rotation: float = 0
     grainline_angle: float = 0
     piece_role: str = ""
+    role_confirmed: bool = False
+    global_enabled: bool = True
+    pair_id: str = ""
+    pair_side: Literal["left", "right", "none", ""] = ""
+    safe_zones: list[dict[str, float]] = Field(default_factory=list)
+    avoid_zones: list[dict[str, float]] = Field(default_factory=list)
     fit_confidence: float = 0
     fit_note: str = ""
 
@@ -113,6 +119,11 @@ class GlobalFitRequest(BaseModel):
     mirror: bool = False
     anchor: str = "front_center"
     symmetry: Literal["continuous", "mirror"] = "continuous"
+    texture_source: Literal["source", "seamless"] = "source"
+
+
+class DesignCanvasPatch(BaseModel):
+    design_canvas: dict[str, Any] = Field(default_factory=dict)
 
 
 class TextureOut(BaseModel):
@@ -123,6 +134,12 @@ class TextureOut(BaseModel):
     source_url: str
     seamless_path: str
     seamless_url: str
+    design_canvas_path: str
+    design_canvas_url: str
+    fit_source_recommendation: Literal["source", "seamless"]
+    fit_source: Literal["source", "seamless"]
+    seamless_mode: str
+    analysis: dict[str, Any]
     prompt: str
     provider: str
     model: str

@@ -319,7 +319,7 @@ def make_offset_tile(source_path: Path, out_path: Path, width: int, height: int)
 
 
 def render_piece(mask_path: Path, texture_path: Path, transform: dict, out_path: Path) -> Path:
-    if transform.get("mode") == "global_canvas":
+    if transform.get("mode") == "global_canvas" and transform.get("global_enabled", True):
         return render_piece_from_design_canvas(mask_path, texture_path, transform, out_path)
     mask = Image.open(mask_path).convert("L")
     texture = Image.open(texture_path).convert("RGBA")

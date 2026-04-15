@@ -42,8 +42,54 @@ export type PieceTransform = {
   design_rotation?: number;
   grainline_angle?: number;
   piece_role?: string;
+  role_confirmed?: boolean;
+  global_enabled?: boolean;
+  pair_id?: string;
+  pair_side?: "left" | "right" | "none" | "";
+  safe_zones?: DesignRect[];
+  avoid_zones?: DesignRect[];
   fit_confidence?: number;
   fit_note?: string;
+};
+
+export type DesignRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type DesignLayer = {
+  id: string;
+  type: "image" | "text";
+  name: string;
+  visible: boolean;
+  locked: boolean;
+  anchor: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  opacity: number;
+  target_roles: string[];
+  asset_id?: string;
+  source_url?: string;
+  content?: string;
+  font_size?: number;
+  font_weight?: string;
+  fill?: string;
+  stroke?: string;
+  stroke_width?: number;
+};
+
+export type SafetyReportItem = {
+  layer_id: string;
+  layer_name: string;
+  level: "ok" | "warning";
+  message: string;
+  piece_id?: string;
+  piece_role?: string;
 };
 
 export type DesignCanvas = {
@@ -60,6 +106,8 @@ export type DesignCanvas = {
   symmetry: "continuous" | "mirror";
   anchor: string;
   design_anchors: Record<string, { x: number; y: number }>;
+  layers: DesignLayer[];
+  safety_report: SafetyReportItem[];
   size_mapping: Record<string, unknown>;
 };
 
@@ -77,6 +125,7 @@ export type GlobalFitOptions = {
   mirror: boolean;
   anchor: string;
   symmetry: "continuous" | "mirror";
+  texture_source: "source" | "seamless";
 };
 
 export type Piece = {
@@ -109,6 +158,12 @@ export type Texture = {
   source_url: string;
   seamless_path: string;
   seamless_url: string;
+  design_canvas_path: string;
+  design_canvas_url: string;
+  fit_source_recommendation: "source" | "seamless";
+  fit_source: "source" | "seamless";
+  seamless_mode: string;
+  analysis: Record<string, unknown>;
   prompt: string;
   provider: string;
   model: string;

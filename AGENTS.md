@@ -15,8 +15,6 @@
 5. 在 Web 工作台中调节单裁片的平移、缩放、旋转、镜像，支持画布直接拖拽。
 6. 导出整套预览 PNG、单裁片透明 PNG、manifest JSON 和 ZIP 打样包。
 
- additionally, 根目录保留了一套旧版纯前端原型（`index.html`、`app.js`、`styles.css`），仅作算法验证参考，日常开发不涉及。
-
 ---
 
 ## 技术栈
@@ -36,9 +34,6 @@
 print/
 ├── package.json                     # workspaces 根配置，含并发启动脚本
 ├── README.md                        # 中文项目说明
-├── INSTALL.md                       # 旧版原型安装说明
-├── index.html / app.js / styles.css # 旧版纯前端原型（只读参考）
-│
 ├── apps/
 │   ├── api/                         # FastAPI 后端
 │   │   ├── app/
@@ -214,7 +209,6 @@ SQLite 核心表：
 5. **图标/图片**：本项目未引入图标库，按钮以文字标签为主。
 6. **类型安全**：前端开启 TS `strict: true`；后端使用 Pydantic 做请求校验。
 7. **文件存储**：所有持久化文件放在 `storage/` 下，路径通过 `config.py` 统一计算，禁止写项目源码目录。
-8. **旧版原型**：根目录 `index.html`、`app.js`、`styles.css` 为只读参考，**不要修改**。
 
 ---
 
