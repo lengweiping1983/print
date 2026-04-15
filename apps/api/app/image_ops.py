@@ -13,6 +13,98 @@ def image_size(path: Path) -> tuple[int, int]:
         return img.size
 
 
+def has_transparent_alpha(image_path: Path, transparent_threshold: int = 250) -> bool:
+    with Image.open(image_path) as img:
+        if img.mode not in {"RGBA", "LA"} and "transparency" not in img.info:
+            return False
+        alpha = img.convert("RGBA").getchannel("A")
+        min_alpha, _ = alpha.getextrema()
+        return min_alpha < transparent_threshold
+
+
+def make_layout_template(
+    image_path: Path,
+    out_path: Path,
+    white_threshold: int = 240,
+    channel_delta: int = 28,
+) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(image_path).convert("RGBA") as img:
+        r, g, b, alpha = img.split()
+        white = r.point(lambda value: 255 if value >= white_threshold else 0)
+        white = ImageChops.multiply(white, g.point(lambda value: 255 if value >= white_threshold else 0))
+        white = ImageChops.multiply(white, b.point(lambda value: 255 if value >= white_threshold else 0))
+        max_channel = ImageChops.lighter(r, ImageChops.lighter(g, b))
+        min_channel = ImageChops.darker(r, ImageChops.darker(g, b))
+        neutral = ImageChops.subtract(max_channel, min_channel).point(lambda value: 255 if value <= channel_delta else 0)
+        candidate = ImageChops.multiply(white, neutral)
+        transparent = alpha.point(lambda value: 255 if value <= 10 else 0)
+        candidate = ImageChops.lighter(candidate, transparent)
+        width, height = candidate.size
+        background = _scanline_edge_connected_background(candidate.tobytes(), width, height)
+        alpha_bytes = bytearray(width * height)
+        for idx, is_background in enumerate(background):
+            alpha_bytes[idx] = 0 if is_background else 255
+
+        out = img.copy()
+        out.putalpha(Image.frombytes("L", (width, height), bytes(alpha_bytes)))
+        out.save(out_path)
+    return out_path
+
+
+def _scanline_edge_connected_background(candidate: bytes, width: int, height: int) -> bytearray:
+    background = bytearray(width * height)
+    queue: deque[tuple[int, int, int]] = deque()
+
+    def add_span(seed_x: int, y: int) -> None:
+        idx = y * width + seed_x
+        if candidate[idx] == 0 or background[idx]:
+            return
+
+        left = seed_x
+        while left > 0:
+            next_idx = y * width + left - 1
+            if candidate[next_idx] == 0 or background[next_idx]:
+                break
+            left -= 1
+
+        right = seed_x
+        while right + 1 < width:
+            next_idx = y * width + right + 1
+            if candidate[next_idx] == 0 or background[next_idx]:
+                break
+            right += 1
+
+        row_start = y * width
+        for x in range(left, right + 1):
+            background[row_start + x] = 1
+        queue.append((left, right, y))
+
+    for x in range(width):
+        add_span(x, 0)
+        add_span(x, height - 1)
+    for y in range(height):
+        add_span(0, y)
+        add_span(width - 1, y)
+
+    while queue:
+        left, right, y = queue.popleft()
+        for next_y in (y - 1, y + 1):
+            if next_y < 0 or next_y >= height:
+                continue
+            x = left
+            row_start = next_y * width
+            while x <= right:
+                idx = row_start + x
+                if candidate[idx] and not background[idx]:
+                    add_span(x, next_y)
+                    while x <= right and candidate[row_start + x] and background[row_start + x]:
+                        x += 1
+                x += 1
+
+    return background
+
+
 def extract_alpha_components(
     image_path: Path,
     out_dir: Path,
@@ -28,52 +120,23 @@ def extract_alpha_components(
     visited = bytearray(width * height)
     pieces: list[dict] = []
 
-    for start in range(width * height):
-        if not mask[start] or visited[start]:
-            continue
-        queue: deque[int] = deque([start])
-        visited[start] = 1
-        pixels: list[int] = []
-        min_x = width
-        min_y = height
-        max_x = 0
-        max_y = 0
-        sum_x = 0
-        sum_y = 0
+    start = 0
+    while True:
+        start = mask.find(1, start)
+        if start == -1:
+            break
 
-        while queue:
-            idx = queue.popleft()
-            x = idx % width
-            y = idx // width
-            pixels.append(idx)
-            sum_x += x
-            sum_y += y
-            min_x = min(min_x, x)
-            min_y = min(min_y, y)
-            max_x = max(max_x, x)
-            max_y = max(max_y, y)
-
-            if x > 0:
-                _push(idx - 1, mask, visited, queue)
-            if x + 1 < width:
-                _push(idx + 1, mask, visited, queue)
-            if y > 0:
-                _push(idx - width, mask, visited, queue)
-            if y + 1 < height:
-                _push(idx + width, mask, visited, queue)
-
-        area = len(pixels)
+        spans, area, min_x, min_y, max_x, max_y, sum_x, sum_y = _collect_component_spans(start, mask, visited, width, height)
+        start += 1
         if area < min_area:
             continue
 
         piece_w = max_x - min_x + 1
         piece_h = max_y - min_y + 1
         piece = Image.new("L", (piece_w, piece_h), 0)
-        piece_pixels = piece.load()
-        for idx in pixels:
-            x = idx % width - min_x
-            y = idx // width - min_y
-            piece_pixels[x, y] = 255
+        draw = ImageDraw.Draw(piece)
+        for left, right, y in spans:
+            draw.line((left - min_x, y - min_y, right - min_x, y - min_y), fill=255)
 
         piece_index = len(pieces) + 1
         mask_name = f"piece_{piece_index:02d}_mask.png"
@@ -100,10 +163,77 @@ def extract_alpha_components(
     return pieces
 
 
-def _push(idx: int, mask: bytearray, visited: bytearray, queue: deque[int]) -> None:
-    if mask[idx] and not visited[idx]:
-        visited[idx] = 1
-        queue.append(idx)
+def _collect_component_spans(
+    start: int,
+    mask: bytearray,
+    visited: bytearray,
+    width: int,
+    height: int,
+) -> tuple[list[tuple[int, int, int]], int, int, int, int, int, int, int]:
+    spans: list[tuple[int, int, int]] = []
+    queue: deque[tuple[int, int, int]] = deque()
+    area = 0
+    min_x = width
+    min_y = height
+    max_x = 0
+    max_y = 0
+    sum_x = 0
+    sum_y = 0
+
+    def add_span(seed_x: int, y: int) -> None:
+        nonlocal area, min_x, min_y, max_x, max_y, sum_x, sum_y
+        idx = y * width + seed_x
+        if not mask[idx] or visited[idx]:
+            return
+
+        left = seed_x
+        while left > 0:
+            next_idx = y * width + left - 1
+            if not mask[next_idx] or visited[next_idx]:
+                break
+            left -= 1
+
+        right = seed_x
+        while right + 1 < width:
+            next_idx = y * width + right + 1
+            if not mask[next_idx] or visited[next_idx]:
+                break
+            right += 1
+
+        row_start = y * width
+        for x in range(left, right + 1):
+            visited[row_start + x] = 1
+            mask[row_start + x] = 0
+
+        count = right - left + 1
+        area += count
+        min_x = min(min_x, left)
+        min_y = min(min_y, y)
+        max_x = max(max_x, right)
+        max_y = max(max_y, y)
+        sum_x += (left + right) * count // 2
+        sum_y += y * count
+        spans.append((left, right, y))
+        queue.append((left, right, y))
+
+    add_span(start % width, start // width)
+
+    while queue:
+        left, right, y = queue.popleft()
+        for next_y in (y - 1, y + 1):
+            if next_y < 0 or next_y >= height:
+                continue
+            x = left
+            row_start = next_y * width
+            while x <= right:
+                idx = row_start + x
+                if mask[idx] and not visited[idx]:
+                    add_span(x, next_y)
+                    while x <= right and visited[row_start + x]:
+                        x += 1
+                x += 1
+
+    return spans, area, min_x, min_y, max_x, max_y, sum_x, sum_y
 
 
 def bbox_polygon(min_x: int, min_y: int, max_x: int, max_y: int) -> list[list[int]]:

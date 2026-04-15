@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from app.image_ops import extract_alpha_components, make_mirror_tile, render_layout
+from app.image_ops import extract_alpha_components, make_layout_template, make_mirror_tile, render_layout
 
 
 def test_extract_alpha_components_sorts_by_area(tmp_path: Path) -> None:
@@ -19,6 +19,25 @@ def test_extract_alpha_components_sorts_by_area(tmp_path: Path) -> None:
     assert pieces[0]["area"] > pieces[1]["area"]
     assert pieces[0]["bbox"] == {"x": 10, "y": 10, "width": 61, "height": 71}
     assert pieces[0]["mask_path"].exists()
+
+
+def test_make_layout_template_removes_only_edge_connected_white_background(tmp_path: Path) -> None:
+    src = tmp_path / "layout.jpg"
+    image = Image.new("RGB", (220, 120), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((10, 10, 90, 100), fill=(18, 42, 104))
+    draw.rectangle((130, 20, 200, 90), fill=(18, 42, 104))
+    draw.ellipse((42, 42, 58, 58), fill=(255, 255, 255))
+    image.save(src, format="JPEG", quality=95)
+
+    template = make_layout_template(src, tmp_path / "template.png")
+    converted = Image.open(template).convert("RGBA")
+    alpha = converted.getchannel("A")
+
+    assert alpha.getpixel((0, 0)) == 0
+    assert alpha.getpixel((50, 50)) == 255
+    pieces = extract_alpha_components(template, tmp_path / "pieces", min_area=20)
+    assert len(pieces) == 2
 
 
 def test_render_layout_with_texture(tmp_path: Path) -> None:

@@ -40,7 +40,7 @@ export function StudioPage() {
       .createProject()
       .then((created) => {
         setProject(created);
-        setNotice("项目已创建，先上传透明 PNG 裁片模板。");
+        setNotice("项目已创建，先上传透明 PNG/WebP 裁片模板或白底排版原图。");
       })
       .catch((error) => setNotice(error.message));
   }, []);
@@ -78,7 +78,7 @@ export function StudioPage() {
       setTemplateFileName(file.name);
       const asset = await upload("template", file);
       if (!asset) return;
-      setNotice("正在解析 alpha 裁片...");
+      setNotice("正在识别模板/排版原图并拆分裁片...");
       const imported = await api.importTemplate(project.id, asset.id);
       setPieces(imported.pieces);
       setSelectedPieceId(imported.pieces[0]?.id ?? "");
@@ -194,7 +194,7 @@ export function StudioPage() {
       <div className="grid grid-cols-[360px_minmax(0,1fr)_320px] gap-4 max-[1500px]:grid-cols-[330px_minmax(0,1fr)] max-[980px]:grid-cols-1">
         <aside className="space-y-4">
           <Panel title="素材">
-            <FileField label="裁片模板 PNG/WebP" accept="image/png,image/webp" selectedName={templateFileName} onFile={handleTemplate} />
+            <FileField label="裁片模板 PNG/WebP 或白底排版原图 JPG/PNG/WebP" accept="image/png,image/webp,image/jpeg" selectedName={templateFileName} onFile={handleTemplate} />
             <div className="mt-4 grid gap-2">
               <label className="text-sm font-semibold">布料来源</label>
               <select className="rounded-lg border border-line bg-white px-3 py-2" value={sourceType} onChange={(event) => setSourceType(event.target.value as typeof sourceType)}>

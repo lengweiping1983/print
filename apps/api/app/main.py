@@ -14,7 +14,9 @@ from .config import DEFAULT_DPI, PROJECTS_DIR, STORAGE_DIR
 from .db import connect, dumps, init_db, loads, now_iso, rel_path, row_to_dict, storage_path
 from .image_ops import (
     extract_alpha_components,
+    has_transparent_alpha,
     image_size,
+    make_layout_template,
     make_mirror_tile,
     make_offset_tile,
     render_layout,
@@ -131,14 +133,25 @@ def import_template(project_id: str, asset_id: str = Form(...)) -> dict:
     ensure_project(project_id)
     asset = get_asset_row(asset_id, project_id)
     ext = Path(asset["filename"]).suffix.lower()
-    if ext not in {".png", ".webp"}:
-        raise HTTPException(status_code=400, detail="第一版已落地 PNG/WebP alpha 模板；SVG/DXF 接口保留，解析器可在下一迭代补齐。")
-    template_path = storage_path(asset["path"])
+    if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(status_code=400, detail="请上传 PNG/WebP 透明裁片模板，或白底排版原图 JPG/PNG/WebP。")
+    source_path = storage_path(asset["path"])
+    template_source = "alpha" if has_transparent_alpha(source_path) else "layout_image"
+    if template_source == "alpha":
+        template_path = source_path
+    else:
+        templates_dir = project_dir(project_id) / "templates"
+        template_path = templates_dir / f"{asset_id}_template.png"
+        make_layout_template(source_path, template_path)
+
+    asset_metadata = loads(asset.get("metadata"), {})
+    asset_metadata.update({"template_source": template_source, "template_path": rel_path(template_path)})
     pieces_dir = project_dir(project_id) / "pieces"
     for old in pieces_dir.glob("*_mask.png"):
         old.unlink()
     pieces = extract_alpha_components(template_path, pieces_dir)
     with connect() as con:
+        con.execute("update assets set metadata = ? where id = ? and project_id = ?", (dumps(asset_metadata), asset_id, project_id))
         con.execute("delete from pieces where project_id = ?", (project_id,))
         for index, piece in enumerate(pieces, start=1):
             piece_id = f"pc_{index:02d}_{uuid.uuid4().hex[:6]}"
@@ -170,7 +183,7 @@ def import_template(project_id: str, asset_id: str = Form(...)) -> dict:
                     now_iso(),
                 ),
             )
-    return {"pieces": list_pieces(project_id)}
+    return {"pieces": list_pieces(project_id), "template_source": template_source, "template_path": rel_path(template_path)}
 
 
 @app.get("/api/projects/{project_id}/pieces", response_model=list[PieceOut])
