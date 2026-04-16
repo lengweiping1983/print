@@ -38,7 +38,7 @@ export function ToastNotice({ notice, job }: { notice: string; job: Job | null }
   );
 }
 
-function SliderField({ label, value, min, max, step = 1, onChange, format }: { label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void; format?: (v: number) => string }) {
+function SliderField({ label, value, min, max, step = 1, onChange, format, disabled }: { label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void; format?: (v: number) => string; disabled?: boolean }) {
   return (
     <label className="grid gap-1 text-xs font-semibold">
       <span className="flex justify-between">
@@ -51,8 +51,9 @@ function SliderField({ label, value, min, max, step = 1, onChange, format }: { l
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full accent-action"
+        className="w-full accent-action disabled:opacity-50"
       />
     </label>
   );
@@ -74,45 +75,47 @@ export function LayerEditor({
   const roles = Array.from(new Set(pieces.map((piece) => piece.transform.piece_role).filter(Boolean))) as string[];
   const canvasW = designCanvas?.width ?? 2400;
   const canvasH = designCanvas?.height ?? 1600;
+  const locked = layer.locked;
   return (
     <div className="grid gap-3 rounded-lg border border-line p-3">
       <label className="grid gap-1 text-sm font-semibold">
         <span>图层名称</span>
-        <input className="rounded-lg border border-line px-3 py-2" value={layer.name} onChange={(event) => onChange({ name: event.target.value })} />
+        <input className="rounded-lg border border-line px-3 py-2 disabled:opacity-50" value={layer.name} disabled={locked} onChange={(event) => onChange({ name: event.target.value })} />
       </label>
       {layer.type === "text" && (
         <label className="grid gap-1 text-sm font-semibold">
           <span>文字内容</span>
-          <input className="rounded-lg border border-line px-3 py-2" value={layer.content || ""} onChange={(event) => onChange({ content: event.target.value })} />
+          <input className="rounded-lg border border-line px-3 py-2 disabled:opacity-50" value={layer.content || ""} disabled={locked} onChange={(event) => onChange({ content: event.target.value })} />
         </label>
       )}
       <div className="grid grid-cols-2 gap-2">
-        <SliderField label="X" value={layer.x} min={-Math.max(0, Math.round(layer.width))} max={canvasW} onChange={(x) => onChange({ x })} />
-        <SliderField label="Y" value={layer.y} min={-Math.max(0, Math.round(layer.height))} max={canvasH} onChange={(y) => onChange({ y })} />
-        <SliderField label="宽" value={layer.width} min={20} max={Math.round(canvasW * 1.5)} onChange={(width) => onChange({ width })} />
-        <SliderField label="高" value={layer.height} min={20} max={Math.round(canvasH * 1.5)} onChange={(height) => onChange({ height })} />
-        <SliderField label="旋转" value={layer.rotation} min={-180} max={180} step={1} onChange={(rotation) => onChange({ rotation })} />
-        <SliderField label="透明度" value={layer.opacity} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(opacity) => onChange({ opacity })} />
+        <SliderField label="X" value={layer.x} min={-Math.max(0, Math.round(layer.width))} max={canvasW} onChange={(x) => onChange({ x })} disabled={locked} />
+        <SliderField label="Y" value={layer.y} min={-Math.max(0, Math.round(layer.height))} max={canvasH} onChange={(y) => onChange({ y })} disabled={locked} />
+        <SliderField label="宽" value={layer.width} min={20} max={Math.round(canvasW * 1.5)} onChange={(width) => onChange({ width })} disabled={locked} />
+        <SliderField label="高" value={layer.height} min={20} max={Math.round(canvasH * 1.5)} onChange={(height) => onChange({ height })} disabled={locked} />
+        <SliderField label="旋转" value={layer.rotation} min={-180} max={180} step={1} onChange={(rotation) => onChange({ rotation })} disabled={locked} />
+        <SliderField label="透明度" value={layer.opacity} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(opacity) => onChange({ opacity })} disabled={locked} />
       </div>
       {layer.type === "text" && (
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="字号" value={layer.font_size || 120} onChange={(font_size) => onChange({ font_size })} />
-          <NumberField label="描边" value={layer.stroke_width || 0} onChange={(stroke_width) => onChange({ stroke_width })} />
+          <SliderField label="字号" value={layer.font_size || 120} min={10} max={600} step={1} onChange={(font_size) => onChange({ font_size })} disabled={locked} />
+          <SliderField label="描边" value={layer.stroke_width || 0} min={0} max={60} step={1} onChange={(stroke_width) => onChange({ stroke_width })} disabled={locked} />
           <label className="grid gap-1 text-xs font-semibold">
             <span>填充色</span>
-            <input className="h-10 rounded-lg border border-line px-2" value={layer.fill || "#ffffff"} onChange={(event) => onChange({ fill: event.target.value })} />
+            <input type="color" className="h-10 w-full rounded-lg border border-line bg-white px-1 disabled:opacity-50" value={layer.fill || "#ffffff"} disabled={locked} onChange={(event) => onChange({ fill: event.target.value })} />
           </label>
           <label className="grid gap-1 text-xs font-semibold">
             <span>描边色</span>
-            <input className="h-10 rounded-lg border border-line px-2" value={layer.stroke || "#111111"} onChange={(event) => onChange({ stroke: event.target.value })} />
+            <input type="color" className="h-10 w-full rounded-lg border border-line bg-white px-1 disabled:opacity-50" value={layer.stroke || "#111111"} disabled={locked} onChange={(event) => onChange({ stroke: event.target.value })} />
           </label>
         </div>
       )}
       <label className="grid gap-1 text-sm font-semibold">
         <span>目标部位</span>
         <select
-          className="rounded-lg border border-line bg-white px-3 py-2"
+          className="rounded-lg border border-line bg-white px-3 py-2 disabled:opacity-50"
           value={layer.target_roles[0] || ""}
+          disabled={locked}
           onChange={(event) => onChange({ target_roles: event.target.value ? [event.target.value] : [] })}
         >
           <option value="">自动匹配</option>
@@ -137,7 +140,7 @@ export function LayerEditor({
           <span className="font-medium">锁定</span>
         </label>
       </div>
-      <button className="rounded-lg bg-white px-3 py-2 font-semibold text-coral ring-1 ring-line" onClick={onDelete}>
+      <button className="rounded-lg bg-white px-3 py-2 font-semibold text-coral ring-1 ring-line disabled:opacity-50" disabled={locked} onClick={onDelete}>
         删除图层
       </button>
     </div>

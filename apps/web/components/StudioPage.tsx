@@ -247,6 +247,7 @@ export function StudioPage() {
 
   const [texturePrompts, setTexturePrompts] = useState<FabricPrompt[]>([]);
   const [layerPrompts, setLayerPrompts] = useState<FabricPrompt[]>([]);
+  const [displayProgress, setDisplayProgress] = useState(0);
   const [showPromptMenu, setShowPromptMenu] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [aiResolution, setAiResolution] = useState<"1K" | "2K" | "4K">("2K");
@@ -322,14 +323,31 @@ export function StudioPage() {
     }
     prevJobRef.current = job;
     const typeLabel = (job.job_type && JOB_TYPE_LABELS[job.job_type]) || job.job_type || "任务";
-    if (job.status === "running") {
-      setNotice(`${typeLabel}进行中… ${Math.round(job.progress * 100)}%`);
-    } else if (job.status === "queued") {
+    if (job.status === "queued") {
       setNotice(`${typeLabel}排队中…`);
     } else if (job.status === "succeeded") {
       setNotice(`${typeLabel}已完成`);
     } else if (job.status === "failed") {
       setNotice(`${typeLabel}失败`);
+    }
+  }, [job]);
+
+  useEffect(() => {
+    if (job?.status === "running") {
+      const typeLabel = (job.job_type && JOB_TYPE_LABELS[job.job_type]) || job.job_type || "任务";
+      setNotice(`${typeLabel}进行中… ${Math.round(displayProgress * 100)}%`);
+    }
+  }, [job, displayProgress]);
+
+  useEffect(() => {
+    if (job?.status === "running") {
+      setDisplayProgress((p) => Math.max(p, job.progress));
+      const timer = setInterval(() => {
+        setDisplayProgress((p) => Math.min(0.95, p + 0.05));
+      }, 10000);
+      return () => clearInterval(timer);
+    } else {
+      setDisplayProgress(job?.progress ?? 0);
     }
   }, [job]);
 
@@ -1118,7 +1136,7 @@ export function StudioPage() {
               action={
                 <div className="flex gap-2">
                   <button type="button" className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold text-ink ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
-                    添加文字层
+                    添加文字
                   </button>
                   <button type="button" className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => layerImageInputRef.current?.click()}>
                     上传图片
@@ -1610,7 +1628,7 @@ function createLayer(type: "image" | "text", designCanvas: DesignCanvas, asset?:
     rotation: 0,
     opacity: 1,
     target_roles: [],
-    content: "23",
+    content: "",
     font_size: 120,
     font_weight: "700",
     fill: "#ffffff",

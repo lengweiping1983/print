@@ -17,6 +17,7 @@ const IMAGE_CACHE_LIMIT = 64;
 const MASK_CACHE_LIMIT = 48;
 const MAX_SAMPLE_CANVAS_EDGE = 1024;
 const MAX_SAMPLE_CANVAS_PIXELS = 1_048_576;
+const WORKSPACE_CANVAS_HEIGHT = 640;
 let activeImageLoads = 0;
 const imageLoadQueue: Array<() => void> = [];
 let maskWorker: Worker | null = null;
@@ -458,7 +459,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
   }, [alphaMaskImage, outlineWidth]);
   const [stageWrapRef, stageWrapSize] = useElementSize<HTMLDivElement>();
   const stageWidth = Math.max(320, Math.round(stageWrapSize.width || 520));
-  const stageHeight = Math.max(440, Math.min(640, Math.round(stageWidth * 1.22)));
+  const stageHeight = compact ? WORKSPACE_CANVAS_HEIGHT : Math.max(440, Math.min(WORKSPACE_CANVAS_HEIGHT, Math.round(stageWidth * 1.22)));
   const selectedMaskFrame = useMemo(() => {
     if (!selected) return null;
     const innerWidth = Math.max(1, stageWidth - 80);
@@ -744,13 +745,13 @@ export function LayoutPreview({
   );
   const layoutFitZoom = useMemo(() => {
     const maxWidth = Math.max(360, previewWrapSize.width || 980);
-    const maxHeight = 720;
+    const maxHeight = WORKSPACE_CANVAS_HEIGHT;
     const next = Math.min(maxWidth / layoutBounds.width, maxHeight / layoutBounds.height, 1);
     return Math.max(0.05, Number(next.toFixed(2)));
   }, [layoutBounds, previewWrapSize.width]);
   const designFitZoom = useMemo(() => {
     const maxWidth = Math.max(360, previewWrapSize.width || 980);
-    const maxHeight = 720;
+    const maxHeight = WORKSPACE_CANVAS_HEIGHT;
     const next = Math.min(maxWidth / designBounds.width, maxHeight / designBounds.height, 1);
     return Math.max(0.05, Number(next.toFixed(2)));
   }, [designBounds, previewWrapSize.width]);
@@ -808,14 +809,14 @@ export function LayoutPreview({
           <ZoomButton label="100%" onClick={() => updateCurrentZoom(() => 1)} />
         </div>
       </div>
-      <div ref={previewWrapRef} className="relative flex max-h-[640px] min-h-[360px] justify-center overflow-auto rounded-lg border border-line bg-white">
+      <div ref={previewWrapRef} className="relative flex h-[640px] justify-center overflow-auto rounded-lg border border-line bg-white">
         {pieces.length === 0 && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-white text-lg text-slate-500">
             请先选择套装！
           </div>
         )}
         <div className={previewMode === "layout" ? "block shrink-0" : "hidden shrink-0"}>
-          <Stage width={Math.ceil(layoutBounds.width * layoutZoom)} height={Math.ceil(layoutBounds.height * layoutZoom)}>
+          <Stage width={Math.ceil(layoutBounds.width * layoutZoom)} height={Math.max(WORKSPACE_CANVAS_HEIGHT, Math.ceil(layoutBounds.height * layoutZoom))}>
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
               <Rect x={0} y={0} width={layoutBounds.width} height={layoutBounds.height} fill="#ffffff" />
             </Layer>
@@ -835,7 +836,7 @@ export function LayoutPreview({
           </Stage>
         </div>
         <div className={previewMode === "design" ? "block shrink-0" : "hidden shrink-0"}>
-          <Stage width={Math.ceil(designBounds.width * designZoom)} height={Math.ceil(designBounds.height * designZoom)}>
+          <Stage width={Math.ceil(designBounds.width * designZoom)} height={Math.max(WORKSPACE_CANVAS_HEIGHT, Math.ceil(designBounds.height * designZoom))}>
             <Layer scaleX={designZoom} scaleY={designZoom}>
               <Rect x={0} y={0} width={designBounds.width} height={designBounds.height} fill="#ffffff" />
               {textureImage && (
@@ -1702,6 +1703,14 @@ function ClippedTextureLayer({
   const renderPiece = contentPiece || piece;
   const frameScale = frame.width / Math.max(1, renderPiece.width);
   const globalMode = renderPiece.transform.mode === "global_canvas";
+  const canDrag = draggable && !piece.transform.locked;
+  const dragStateRef = useRef<{
+    startX: number;
+    startY: number;
+    startOffsetX: number;
+    startOffsetY: number;
+  } | null>(null);
+  const lastDragOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const effectiveMirrorX = Boolean(renderPiece.transform.mirror_x) !== contentMirrorX;
   const effectiveMirrorY = Boolean(renderPiece.transform.mirror_y) !== contentMirrorY;
   const designX = (renderPiece.transform.design_x ?? 0) + renderPiece.transform.offset_x;
@@ -1731,41 +1740,36 @@ function ClippedTextureLayer({
   const imageHeight = globalMode ? frame.height : Math.max(1, textureImage.naturalHeight * renderPiece.transform.scale * frameScale);
   const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : renderPiece.transform.offset_x * frameScale);
   const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : renderPiece.transform.offset_y * frameScale);
-  const commitDragOffset = (x: number, y: number) => {
-    if (globalMode) {
-      const deltaX = Math.round((x - (frame.x + frame.width / 2)) / frameScale);
-      const deltaY = Math.round((y - (frame.y + frame.height / 2)) / frameScale);
-      const next = {
-        x: renderPiece.transform.offset_x - deltaX,
-        y: renderPiece.transform.offset_y - deltaY
-      };
-      if (snapSettings) {
-        const snapped = snapPieceSamplingOffset({
-            designX: renderPiece.transform.design_x ?? 0,
-            designY: renderPiece.transform.design_y ?? 0,
-            offsetX: next.x,
-            offsetY: next.y,
-            ...snapSettings,
-        });
-        return { x: snapped.offsetX, y: snapped.offsetY };
-      }
-      return next;
-    }
-    const next = {
-      x: Math.round((x - (frame.x + frame.width / 2)) / frameScale),
-      y: Math.round((y - (frame.y + frame.height / 2)) / frameScale)
-    };
-    if (snapSettings) {
-      const snapped = snapPieceSamplingOffset({
-          designX: renderPiece.transform.design_x ?? 0,
-          designY: renderPiece.transform.design_y ?? 0,
-          offsetX: next.x,
-          offsetY: next.y,
-          ...snapSettings,
-      });
-      return { x: snapped.offsetX, y: snapped.offsetY };
-    }
-    return next;
+  const dragOffsetFromNode = (x: number, y: number) => {
+    const state = dragStateRef.current;
+    const baseOffsetX = state?.startOffsetX ?? renderPiece.transform.offset_x;
+    const baseOffsetY = state?.startOffsetY ?? renderPiece.transform.offset_y;
+    const baseX = state?.startX ?? frame.x;
+    const baseY = state?.startY ?? frame.y;
+    const deltaX = Math.round((x - baseX) / frameScale);
+    const deltaY = Math.round((y - baseY) / frameScale);
+    return globalMode
+      ? { x: baseOffsetX - deltaX, y: baseOffsetY - deltaY }
+      : { x: baseOffsetX + deltaX, y: baseOffsetY + deltaY };
+  };
+  const snapDragOffset = (next: { x: number; y: number }) => {
+    if (!snapSettings) return next;
+    const snapped = snapPieceSamplingOffset({
+      designX: renderPiece.transform.design_x ?? 0,
+      designY: renderPiece.transform.design_y ?? 0,
+      offsetX: next.x,
+      offsetY: next.y,
+      ...snapSettings,
+    });
+    return { x: snapped.offsetX, y: snapped.offsetY };
+  };
+  const resetDragTarget = (target: { x: (value: number) => void; y: (value: number) => void }) => {
+    target.x(frame.x);
+    target.y(frame.y);
+  };
+  const setStageCursor = (target: { getStage: () => { container: () => HTMLDivElement } | null }, cursor: string) => {
+    const container = target.getStage()?.container();
+    if (container) container.style.cursor = cursor;
   };
 
   return (
@@ -1782,39 +1786,9 @@ function ClippedTextureLayer({
         scaleX={!globalMode && effectiveMirrorX ? -1 : 1}
         scaleY={!globalMode && effectiveMirrorY ? -1 : 1}
         opacity={opacity}
-        draggable={draggable && !piece.transform.locked}
+        listening={!canDrag}
         onClick={onSelect}
         onTap={onSelect}
-        onDragMove={(event) => {
-          if (!onPreviewMove) return;
-          const next = commitDragOffset(event.target.x(), event.target.y());
-          if (globalMode) {
-            event.target.x(frame.x + frame.width / 2);
-            event.target.y(frame.y + frame.height / 2);
-          } else if (snapSettings) {
-            event.target.x(frame.x + frame.width / 2 + next.x * frameScale);
-            event.target.y(frame.y + frame.height / 2 + next.y * frameScale);
-          }
-          onPreviewMove(next.x, next.y);
-        }}
-        onDragEnd={(event) => {
-          if (!onMove) return;
-          const next = commitDragOffset(event.target.x(), event.target.y());
-          if (globalMode) {
-            event.target.x(frame.x + frame.width / 2);
-            event.target.y(frame.y + frame.height / 2);
-          } else if (snapSettings) {
-            event.target.x(frame.x + frame.width / 2 + next.x * frameScale);
-            event.target.y(frame.y + frame.height / 2 + next.y * frameScale);
-          }
-          onMove(next.x, next.y);
-        }}
-        onDragStart={() => {
-          onPreviewMove?.(renderPiece.transform.offset_x, renderPiece.transform.offset_y);
-        }}
-        onDragCancel={() => {
-          onMoveCancel?.();
-        }}
       />
       <KonvaImage
         image={maskImage}
@@ -1823,9 +1797,54 @@ function ClippedTextureLayer({
         width={frame.width}
         height={frame.height}
         globalCompositeOperation="destination-in"
+        listening={!canDrag}
         onClick={onSelect}
         onTap={onSelect}
       />
+      {canDrag && (
+        <Rect
+          x={frame.x}
+          y={frame.y}
+          width={frame.width}
+          height={frame.height}
+          fill="#000000"
+          opacity={0.001}
+          draggable
+          onClick={onSelect}
+          onTap={onSelect}
+          onMouseEnter={(event) => setStageCursor(event.target, "grab")}
+          onMouseLeave={(event) => setStageCursor(event.target, "")}
+          onDragStart={(event) => {
+            dragStateRef.current = {
+              startX: event.target.x(),
+              startY: event.target.y(),
+              startOffsetX: renderPiece.transform.offset_x,
+              startOffsetY: renderPiece.transform.offset_y,
+            };
+            lastDragOffsetRef.current = { x: renderPiece.transform.offset_x, y: renderPiece.transform.offset_y };
+            setStageCursor(event.target, "grabbing");
+            onPreviewMove?.(renderPiece.transform.offset_x, renderPiece.transform.offset_y);
+          }}
+          onDragMove={(event) => {
+            if (!onPreviewMove) return;
+            const next = dragOffsetFromNode(event.target.x(), event.target.y());
+            lastDragOffsetRef.current = next;
+            onPreviewMove(next.x, next.y);
+          }}
+          onDragEnd={(event) => {
+            const next = snapDragOffset(lastDragOffsetRef.current || dragOffsetFromNode(event.target.x(), event.target.y()));
+            resetDragTarget(event.target);
+            dragStateRef.current = null;
+            lastDragOffsetRef.current = null;
+            setStageCursor(event.target, "grab");
+            if (onMove) {
+              onMove(next.x, next.y);
+            } else {
+              onMoveCancel?.();
+            }
+          }}
+        />
+      )}
     </Layer>
   );
 }
