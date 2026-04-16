@@ -1,8 +1,9 @@
 from io import BytesIO
+import time
 
-import pytest
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
+import pytest
 
 from app.main import app
 
@@ -105,7 +106,7 @@ def test_template_set_full_workflow() -> None:
         assert m_pieces_endpoint[0]["piece_role"] == "front_center"
 
         # 9. POST /api/projects/from-template-set with copy_design_from_base=true
-        #    design_width/height should be scaled by scale_to_base
+        #    legacy design_width/height may remain, but rendering uses real piece size.
         project = client.post(
             "/api/projects/from-template-set",
             json={"set_id": set_id, "size_name": "M", "copy_design_from_base": True},
@@ -120,20 +121,11 @@ def test_template_set_full_workflow() -> None:
             # role should carry from piece-def
             assert pp["transform"]["piece_role"] in ("front_center", "unknown")
 
-        # Verify scaling: project piece design_width ≈ base_design_width * scale_to_base
-        base_pieces = client.get(
-            f"/api/template-sets/{set_id}/sizes/{size_s['id']}/pieces"
-        ).json()
-        base_by_def = {p["piece_def_id"]: p for p in base_pieces}
         for pp, stp in zip(project_pieces, m_pieces_endpoint):
-            base_p = base_by_def.get(stp["piece_def_id"])
-            assert base_p is not None
-            base_dw = base_p.get("width", 1)
-            base_dh = base_p.get("height", 1)
-            expected_dw = base_dw * stp["scale_to_base"]
-            expected_dh = base_dh * stp["scale_to_base"]
-            assert pp["transform"]["design_width"] == pytest.approx(expected_dw, rel=0.01)
-            assert pp["transform"]["design_height"] == pytest.approx(expected_dh, rel=0.01)
+            assert pp["width"] == stp["width"]
+            assert pp["height"] == stp["height"]
+            assert isinstance(pp["transform"]["design_x"], (int, float))
+            assert isinstance(pp["transform"]["design_y"], (int, float))
 
         # 10. POST /api/template-sets/{set_id}/base-size
         switch = client.post(
@@ -193,6 +185,118 @@ def test_template_set_delete_size_reassigns_base() -> None:
         assert not any(s["id"] == size_s_id for s in sizes)
 
 
+@pytest.mark.parametrize(
+    ("mirror_x", "mirror_y"),
+    [(False, False), (True, False), (False, True), (True, True)],
+)
+def test_template_set_linked_piece_creates_project_mirror_relation(mirror_x: bool, mirror_y: bool) -> None:
+    client = TestClient(app)
+    with client:
+        ts = client.post(
+            "/api/template-sets",
+            json={"name": "Linked Pieces", "garment_type": "shirt", "version_label": "v1"},
+        ).json()
+        set_id = ts["id"]
+        asset = client.post(
+            f"/api/template-sets/{set_id}/assets",
+            files={"file": ("base.png", _make_rect_pair_image(), "image/png")},
+        ).json()
+        client.post(
+            f"/api/template-sets/{set_id}/sizes/import",
+            data={"asset_id": asset["id"], "size_name": "S"},
+        ).json()
+        piece_defs = client.get(f"/api/template-sets/{set_id}/piece-defs").json()
+        source_def, linked_def = piece_defs[0], piece_defs[1]
+        linked_transform = {
+            **linked_def["base_transform"],
+            "linked_def_id": source_def["id"],
+            "link_mirror_x": mirror_x,
+            "link_mirror_y": mirror_y,
+        }
+        client.patch(
+            f"/api/template-sets/{set_id}/piece-defs/{linked_def['id']}",
+            json={"base_transform": linked_transform},
+        )
+
+        project = client.post(
+            "/api/projects/from-template-set",
+            json={"set_id": set_id, "size_name": "S", "copy_design_from_base": True},
+        ).json()
+        pieces = client.get(f"/api/projects/{project['id']}/pieces").json()
+        source_piece = next(piece for piece in pieces if piece["name"] == source_def["name"])
+        linked_piece = next(piece for piece in pieces if piece["name"] == linked_def["name"])
+
+        assert linked_piece["mirror_of"] == source_piece["id"]
+        assert linked_piece["transform"]["mirror_x"] is mirror_x
+        assert linked_piece["transform"]["mirror_y"] is mirror_y
+        assert linked_piece["transform"]["global_enabled"] is False
+        assert "design_x" not in linked_piece["transform"] or linked_piece["transform"]["design_x"] == 0
+
+
+def test_global_fit_mappings_exclude_linked_pieces() -> None:
+    client = TestClient(app)
+    with client:
+        ts = client.post(
+            "/api/template-sets",
+            json={"name": "Linked Fit", "garment_type": "shirt", "version_label": "v1"},
+        ).json()
+        set_id = ts["id"]
+        asset = client.post(
+            f"/api/template-sets/{set_id}/assets",
+            files={"file": ("base.png", _make_rect_pair_image(), "image/png")},
+        ).json()
+        client.post(
+            f"/api/template-sets/{set_id}/sizes/import",
+            data={"asset_id": asset["id"], "size_name": "S"},
+        )
+        piece_defs = client.get(f"/api/template-sets/{set_id}/piece-defs").json()
+        source_def, linked_def = piece_defs[0], piece_defs[1]
+        client.patch(
+            f"/api/template-sets/{set_id}/piece-defs/{linked_def['id']}",
+            json={
+                "base_transform": {
+                    **linked_def["base_transform"],
+                    "linked_def_id": source_def["id"],
+                    "link_mirror_x": False,
+                    "link_mirror_y": False,
+                }
+            },
+        )
+        project = client.post(
+            "/api/projects/from-template-set",
+            json={"set_id": set_id, "size_name": "S", "copy_design_from_base": True},
+        ).json()
+        pieces = client.get(f"/api/projects/{project['id']}/pieces").json()
+        linked_piece = next(piece for piece in pieces if piece["mirror_of"])
+
+        texture = Image.new("RGBA", (64, 64), (24, 96, 180, 255))
+        texture_buf = BytesIO()
+        texture.save(texture_buf, format="PNG")
+        texture_buf.seek(0)
+        texture_asset = client.post(
+            f"/api/projects/{project['id']}/assets",
+            data={"kind": "pattern"},
+            files={"file": ("water.png", texture_buf, "image/png")},
+        ).json()
+        texture_job = client.post(
+            f"/api/projects/{project['id']}/textures/generate",
+            json={"source_asset_id": texture_asset["id"], "source_type": "pattern", "provider": "local", "model": "local-copy"},
+        ).json()["job_id"]
+        texture_done = _wait_job(client, texture_job)
+        texture_id = texture_done["output"]["texture"]["id"]
+
+        fit_job = client.post(
+            f"/api/projects/{project['id']}/textures/{texture_id}/fit-global",
+            json={"garment_type": "shirt", "texture_scale": 1, "texture_angle": 0, "symmetry": "continuous"},
+        ).json()["job_id"]
+        fit_done = _wait_job(client, fit_job)
+
+        mapped_ids = {mapping["id"] for mapping in fit_done["output"]["mappings"]}
+        assert fit_done["status"] == "succeeded"
+        assert linked_piece["id"] not in mapped_ids
+        assert len(mapped_ids) == 1
+
+
 def _make_rect_pair_image(scale: float = 1.0) -> BytesIO:
     img = Image.new("RGBA", (200, 100), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -210,3 +314,12 @@ def _make_rect_pair_image(scale: float = 1.0) -> BytesIO:
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf
+
+
+def _wait_job(client: TestClient, job_id: str) -> dict:
+    for _ in range(80):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in {"succeeded", "failed"}:
+            return job
+        time.sleep(0.1)
+    raise AssertionError("job did not finish")

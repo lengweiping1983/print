@@ -310,12 +310,10 @@ export default function SizeTemplateDetailPage() {
                             <div className="grid grid-cols-2 gap-2">
                               {num("全局 X", "design_x", 0, 8192)}
                               {num("全局 Y", "design_y", 0, 8192)}
-                              {num("取样宽", "design_width", 24, 8192)}
-                              {num("取样高", "design_height", 24, 8192)}
                               {num("平移 X", "offset_x", -1500, 1500)}
                               {num("平移 Y", "offset_y", -1500, 1500)}
-                              {num("缩放", "scale", 0.2, 6, 0.01)}
-                              {num("旋转", "rotation", -180, 180)}
+                              {num("单片缩放", "scale", 0.2, 6, 0.01)}
+                              {num("单片旋转", "rotation", -180, 180)}
                             </div>
                             <div className="mt-2 flex items-center gap-3">
                               <label className="flex items-center gap-1 text-xs">

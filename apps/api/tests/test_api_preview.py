@@ -149,7 +149,8 @@ def test_global_fit_updates_piece_transforms_and_preview() -> None:
         assert fit_done["output"]["fit_preview_url"].endswith(".png")
         pieces = client.get(f"/api/projects/{project['id']}/pieces").json()
         assert all(piece["transform"]["mode"] == "global_canvas" for piece in pieces)
-        assert all(piece["transform"]["design_width"] > 0 for piece in pieces)
+        assert all(isinstance(piece["transform"]["design_x"], (int, float)) for piece in pieces)
+        assert all(isinstance(piece["transform"]["design_y"], (int, float)) for piece in pieces)
         assert all(piece["transform"]["safe_zones"] for piece in pieces)
         assert all(piece["transform"]["avoid_zones"] for piece in pieces)
 

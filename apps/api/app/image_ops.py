@@ -519,9 +519,58 @@ def render_piece(mask_path: Path, texture_path: Path, transform: dict, out_path:
     return out_path
 
 
-def render_piece_image(mask_path: Path, texture_path: Path, transform: dict) -> Image.Image:
+def render_piece_from_project_piece(
+    piece: dict,
+    texture_path: Path,
+    out_path: Path,
+    pieces_by_id: dict[str, dict] | None = None,
+) -> Path:
+    canvas = render_project_piece_image(piece, texture_path, pieces_by_id or {})
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(out_path)
+    canvas.close()
+    return out_path
+
+
+def render_project_piece_image(
+    piece: dict,
+    texture_path: Path,
+    pieces_by_id: dict[str, dict],
+    seen: set[str] | None = None,
+    include_markers: bool = True,
+) -> Image.Image:
+    mirror_of = str(piece.get("mirror_of") or "")
+    if not mirror_of:
+        return render_piece_image(Path(piece["mask_path"]), texture_path, piece.get("transform") or {}, include_markers=include_markers)
+
+    seen = set(seen or set())
+    piece_id = str(piece.get("id") or "")
+    if piece_id:
+        seen.add(piece_id)
+    source = pieces_by_id.get(mirror_of)
+    if not source or mirror_of in seen:
+        return render_piece_image(Path(piece["mask_path"]), texture_path, piece.get("transform") or {}, include_markers=include_markers)
+
+    derived = render_project_piece_image(source, texture_path, pieces_by_id, seen, include_markers=False)
+    transform = piece.get("transform") or {}
+    if transform.get("mirror_x"):
+        derived = ImageOps.mirror(derived)
+    if transform.get("mirror_y"):
+        derived = ImageOps.flip(derived)
+
+    mask = Image.open(piece["mask_path"]).convert("L")
+    if derived.size != mask.size:
+        derived = derived.resize(mask.size, Image.Resampling.LANCZOS)
+    derived.putalpha(mask)
+    if include_markers:
+        composite_piece_markers(derived, Path(piece["mask_path"]))
+    mask.close()
+    return derived
+
+
+def render_piece_image(mask_path: Path, texture_path: Path, transform: dict, include_markers: bool = True) -> Image.Image:
     if transform.get("mode") == "global_canvas" and transform.get("global_enabled", True):
-        return render_piece_from_design_canvas_image(mask_path, texture_path, transform)
+        return render_piece_from_design_canvas_image(mask_path, texture_path, transform, include_markers=include_markers)
     ensure_image_within_limit(mask_path)
     ensure_image_within_limit(texture_path)
     mask = Image.open(mask_path).convert("L")
@@ -545,7 +594,8 @@ def render_piece_image(mask_path: Path, texture_path: Path, transform: dict) -> 
     start_y = -tile.height + (offset_y % max(1, tile.height))
     paint_tiled(canvas, tile, start_x, start_y)
     canvas.putalpha(mask)
-    composite_piece_markers(canvas, mask_path)
+    if include_markers:
+        composite_piece_markers(canvas, mask_path)
     mask.close()
     texture.close()
     return canvas
@@ -559,28 +609,77 @@ def render_piece_from_design_canvas(mask_path: Path, design_canvas_path: Path, t
     return out_path
 
 
-def render_piece_from_design_canvas_image(mask_path: Path, design_canvas_path: Path, transform: dict) -> Image.Image:
+def render_piece_from_design_canvas_image(mask_path: Path, design_canvas_path: Path, transform: dict, include_markers: bool = True) -> Image.Image:
     ensure_image_within_limit(mask_path)
     ensure_image_within_limit(design_canvas_path)
     mask = Image.open(mask_path).convert("L")
     with Image.open(design_canvas_path).convert("RGBA") as design_canvas:
         design_x = float(transform.get("design_x", 0) or 0) + float(transform.get("offset_x", 0) or 0)
         design_y = float(transform.get("design_y", 0) or 0) + float(transform.get("offset_y", 0) or 0)
-        design_w = float(transform.get("design_width", 0) or mask.width)
-        design_h = float(transform.get("design_height", 0) or mask.height)
-        design_rotation = float(transform.get("design_rotation", 0) or 0)
-        sample = sample_design_region(design_canvas, design_x, design_y, design_w, design_h, mask.size)
+        scale = max(0.05, float(transform.get("scale", 1) or 1))
+        rotation = float(transform.get("rotation", 0) or 0)
+        sample = sample_design_window(design_canvas, design_x, design_y, mask.size, scale, rotation)
         if transform.get("mirror_x"):
             sample = ImageOps.mirror(sample)
         if transform.get("mirror_y"):
             sample = ImageOps.flip(sample)
-        if design_rotation:
-            rotated = sample.rotate(design_rotation, expand=False, resample=Image.Resampling.BICUBIC)
-            sample = rotated
     sample.putalpha(mask)
-    composite_piece_markers(sample, mask_path)
+    if include_markers:
+        composite_piece_markers(sample, mask_path)
     mask.close()
     return sample
+
+
+def sample_design_window(
+    design_canvas: Image.Image,
+    x: float,
+    y: float,
+    out_size: tuple[int, int],
+    scale: float = 1,
+    rotation: float = 0,
+) -> Image.Image:
+    scale = max(0.05, float(scale or 1))
+    rotation = float(rotation or 0)
+    if abs(scale - 1) < 0.0001 and abs(rotation % 360) < 0.0001:
+        return sample_design_region(design_canvas, x, y, out_size[0], out_size[1], out_size)
+
+    width, height = out_size
+    cx = width / 2
+    cy = height / 2
+    angle = math.radians(rotation)
+    cos_a = math.cos(angle) / scale
+    sin_a = math.sin(angle) / scale
+
+    def source_point(px: float, py: float) -> tuple[float, float]:
+        dx = px - cx
+        dy = py - cy
+        sx = cx + cos_a * dx + sin_a * dy
+        sy = cy - sin_a * dx + cos_a * dy
+        return x + sx, y + sy
+
+    corners = [source_point(0, 0), source_point(width, 0), source_point(0, height), source_point(width, height)]
+    min_x = min(point[0] for point in corners)
+    min_y = min(point[1] for point in corners)
+    max_x = max(point[0] for point in corners)
+    max_y = max(point[1] for point in corners)
+    padding = 3
+    crop_x = math.floor(min_x) - padding
+    crop_y = math.floor(min_y) - padding
+    crop_w = max(1, math.ceil(max_x) - crop_x + padding)
+    crop_h = max(1, math.ceil(max_y) - crop_y + padding)
+    crop = sample_design_region(design_canvas, crop_x, crop_y, crop_w, crop_h, (crop_w, crop_h))
+
+    affine = (
+        cos_a,
+        sin_a,
+        x + cx - cos_a * cx - sin_a * cy - crop_x,
+        -sin_a,
+        cos_a,
+        y + cy + sin_a * cx - cos_a * cy - crop_y,
+    )
+    transformed = crop.transform(out_size, Image.Transform.AFFINE, affine, resample=Image.Resampling.BICUBIC)
+    crop.close()
+    return transformed
 
 
 def sample_design_region(
@@ -659,8 +758,10 @@ def render_layout(
     ensure_image_within_limit(texture_path)
     out = Image.new("RGBA", canvas_size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(out)
-    for piece in pieces:
-        rendered = render_piece_image(Path(piece["mask_path"]), texture_path, piece["transform"])
+    piece_list = list(pieces)
+    pieces_by_id = {str(piece.get("id")): piece for piece in piece_list}
+    for piece in piece_list:
+        rendered = render_project_piece_image(piece, texture_path, pieces_by_id)
         out.alpha_composite(rendered, (piece["source_x"], piece["source_y"]))
         rendered.close()
         if include_outline:

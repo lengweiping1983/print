@@ -5,7 +5,7 @@ import { PIECE_ROLE_LABELS } from "@/lib/labels";
 import "konva/lib/shapes/Image.js";
 import "konva/lib/shapes/Rect.js";
 import "konva/lib/shapes/Text.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva/es/ReactKonvaCore.js";
 
 const loadedImageCache = new Map<string, Promise<HTMLImageElement | null>>();
@@ -333,9 +333,11 @@ type SinglePieceCalibrationProps = {
   onToggleOutlines: (visible: boolean) => void;
   onOutlineWidthChange?: (width: number) => void;
   onMovePiece: (piece: Piece, x: number, y: number) => void;
+  onPatchTransform?: (transform: Partial<Piece["transform"]>) => void;
+  onResetPiece?: () => void;
 };
 
-export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece }: SinglePieceCalibrationProps) {
+export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece, onPatchTransform, onResetPiece }: SinglePieceCalibrationProps) {
   const textureImage = useLoadedImage(textureUrl);
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
@@ -390,7 +392,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
           <ZoomButton label="+" onClick={() => setPieceZoom((zoom) => clampZoom(zoom + 0.1))} />
         </div>
       </div>
-      <div ref={stageWrapRef} className="overflow-hidden rounded-lg border border-line bg-white">
+      <div ref={stageWrapRef} className="relative overflow-hidden rounded-lg border border-line bg-white">
         <Stage width={stageWidth} height={stageHeight}>
           <Layer>
             <Rect x={0} y={0} width={stageWidth} height={stageHeight} fill="#ffffff" />
@@ -414,7 +416,8 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
               maskImage={alphaMaskImage}
               frame={selectedMaskFrame}
               zoom={pieceZoom}
-              draggable
+              draggable={!selected.mirror_of}
+              opacity={selected.mirror_of ? 0.45 : 1}
               onMove={(x, y) => onMovePiece(selected, x, y)}
             />
           )}
@@ -431,6 +434,116 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
             </Layer>
           )}
         </Stage>
+        {selected && onPatchTransform && !selected.mirror_of && (
+          <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
+            <PieceToolbarButton label="X" value={selected.transform.design_x ?? 0}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold">全局 X</span>
+                <span className="text-sm font-bold">{selected.transform.design_x ?? 0}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={8192}
+                value={selected.transform.design_x ?? 0}
+                onChange={(e) => onPatchTransform({ design_x: Number(e.target.value) })}
+                className="w-full accent-action"
+              />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">裁片左上角在全局画布中的左右位置。</p>
+            </PieceToolbarButton>
+            <PieceToolbarButton label="Y" value={selected.transform.design_y ?? 0}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold">全局 Y</span>
+                <span className="text-sm font-bold">{selected.transform.design_y ?? 0}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={8192}
+                value={selected.transform.design_y ?? 0}
+                onChange={(e) => onPatchTransform({ design_y: Number(e.target.value) })}
+                className="w-full accent-action"
+              />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">裁片左上角在全局画布中的上下位置。</p>
+            </PieceToolbarButton>
+            <PieceToolbarButton label="缩" value={selected.transform.scale}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold">单片缩放</span>
+                <span className="text-sm font-bold">{selected.transform.scale.toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                min={0.2}
+                max={6}
+                step={0.01}
+                value={selected.transform.scale}
+                onChange={(e) => onPatchTransform({ scale: Number(e.target.value) })}
+                className="w-full accent-action"
+              />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">叠加在全局设计画布之后，只影响当前裁片，默认保持 1。</p>
+            </PieceToolbarButton>
+            <PieceToolbarButton label="转" value={selected.transform.rotation}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold">单片旋转</span>
+                <span className="text-sm font-bold">{selected.transform.rotation}</span>
+              </div>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={selected.transform.rotation}
+                onChange={(e) => onPatchTransform({ rotation: Number(e.target.value) })}
+                className="w-full accent-action"
+              />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">叠加在全局设计画布方向之后，只影响当前裁片，默认保持 0。</p>
+            </PieceToolbarButton>
+            <div className="group relative">
+              <button
+                className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 transition hover:-translate-y-0.5 ${
+                  selected.transform.locked
+                    ? "bg-amber-100 text-amber-700 ring-amber-200"
+                    : "bg-white text-ink ring-line hover:bg-slate-50"
+                }`}
+                onClick={() => onPatchTransform({ locked: !selected.transform.locked })}
+              >
+                {selected.transform.locked ? "锁" : "开"}
+              </button>
+              <div className="pointer-events-none absolute right-full top-1/2 mr-2 w-56 -translate-y-1/2 rounded-xl border border-line bg-white p-3 opacity-0 shadow-xl transition group-hover:pointer-events-auto group-hover:opacity-100">
+                <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-action"
+                    checked={selected.transform.locked}
+                    onChange={(e) => onPatchTransform({ locked: e.target.checked })}
+                  />
+                  <span className="text-sm font-semibold">锁定裁片</span>
+                </label>
+                <p className="mt-1.5 text-xs leading-5 text-slate-500">避免误拖动或误改参数。</p>
+              </div>
+            </div>
+            {onResetPiece && (
+              <div className="group relative">
+                <button
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-bold text-red-600 shadow ring-1 ring-line transition hover:-translate-y-0.5 hover:bg-red-50"
+                  onClick={onResetPiece}
+                >
+                  重
+                </button>
+                <div className="pointer-events-none absolute right-full top-1/2 mr-2 w-56 -translate-y-1/2 rounded-xl border border-line bg-white p-3 opacity-0 shadow-xl transition group-hover:pointer-events-auto group-hover:opacity-100">
+                  <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
+                  <button
+                    className="w-full rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
+                    onClick={onResetPiece}
+                  >
+                    重置当前裁片
+                  </button>
+                  <p className="mt-1.5 text-xs leading-5 text-slate-500">将当前裁片的所有参数恢复为默认值。</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -450,6 +563,19 @@ type LayoutPreviewProps = {
   onSelectLayer?: (id: string) => void;
   onMoveDesignRegion?: (piece: Piece, update: Partial<Piece["transform"]>) => void;
   onMoveLayer?: (layer: DesignLayer, update: Partial<DesignLayer>) => void;
+  globalTextureScale?: number;
+  textureAngle?: number;
+  globalOffsetX?: number;
+  globalOffsetY?: number;
+  onGlobalTextureScaleChange?: (value: number) => void;
+  onTextureAngleChange?: (value: number) => void;
+  onGlobalOffsetXChange?: (value: number) => void;
+  onGlobalOffsetYChange?: (value: number) => void;
+  onApplyGlobalFit?: () => void;
+  onResetGlobalFit?: () => void;
+  canApplyGlobalFit?: boolean;
+  locked?: boolean;
+  onToggleLocked?: () => void;
 };
 
 export function LayoutPreview({
@@ -465,7 +591,20 @@ export function LayoutPreview({
   onSelectPiece,
   onSelectLayer = () => {},
   onMoveDesignRegion = () => {},
-  onMoveLayer = () => {}
+  onMoveLayer = () => {},
+  globalTextureScale = 1,
+  textureAngle = 0,
+  globalOffsetX = 0,
+  globalOffsetY = 0,
+  onGlobalTextureScaleChange = () => {},
+  onTextureAngleChange = () => {},
+  onGlobalOffsetXChange = () => {},
+  onGlobalOffsetYChange = () => {},
+  onApplyGlobalFit = () => {},
+  onResetGlobalFit = () => {},
+  canApplyGlobalFit = false,
+  locked = false,
+  onToggleLocked = () => {}
 }: LayoutPreviewProps) {
   const textureImage = useLoadedImage(textureUrl, fallbackTextureUrl);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
@@ -519,7 +658,7 @@ export function LayoutPreview({
         <div>
           <h2 className="m-0 text-lg font-semibold">{previewMode === "design" ? "全局设计画布" : "整套排版"}</h2>
           <p className="m-0 mt-1 text-sm text-slate-500">
-            {previewMode === "design" ? "查看裁片在虚拟衣服平面中的取样区域。" : "按模板原始坐标回排，导出时保持同一坐标系。"}
+            {previewMode === "design" ? "查看裁片在全局设计画布中的位置。" : "按模板原始坐标回排，导出时保持同一坐标系。"}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -532,7 +671,7 @@ export function LayoutPreview({
           <ZoomButton label="100%" onClick={() => updateCurrentZoom(() => 1)} />
         </div>
       </div>
-      <div ref={previewWrapRef} className="flex max-h-[760px] min-h-[360px] justify-center overflow-auto rounded-lg border border-line bg-white">
+      <div ref={previewWrapRef} className="relative flex max-h-[760px] min-h-[360px] justify-center overflow-auto rounded-lg border border-line bg-white">
         <div className={previewMode === "layout" ? "block shrink-0" : "hidden shrink-0"}>
           <Stage width={Math.ceil(layoutBounds.width * layoutZoom)} height={Math.ceil(layoutBounds.height * layoutZoom)}>
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
@@ -594,6 +733,102 @@ export function LayoutPreview({
             )}
           </Stage>
         </div>
+        {previewMode === "design" && pieces.length > 0 && (
+          <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
+            <PieceToolbarButton label="X" value={globalOffsetX}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold">全局平移 X</span>
+                <span className="text-sm font-bold">{globalOffsetX}</span>
+              </div>
+              <input
+                type="range"
+                min={-2048}
+                max={2048}
+                value={globalOffsetX}
+                onChange={(e) => onGlobalOffsetXChange(Number(e.target.value))}
+                disabled={locked}
+                className="w-full accent-action"
+              />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">左右移动整张设计画布。</p>
+            </PieceToolbarButton>
+            <PieceToolbarButton label="Y" value={globalOffsetY}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold">全局平移 Y</span>
+                <span className="text-sm font-bold">{globalOffsetY}</span>
+              </div>
+              <input
+                type="range"
+                min={-2048}
+                max={2048}
+                value={globalOffsetY}
+                onChange={(e) => onGlobalOffsetYChange(Number(e.target.value))}
+                disabled={locked}
+                className="w-full accent-action"
+              />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">上下移动整张设计画布。</p>
+            </PieceToolbarButton>
+            <PieceToolbarButton label="缩" value={globalTextureScale.toFixed(2)}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold">全局缩放</span>
+                <span className="text-sm font-bold">{globalTextureScale.toFixed(2)}</span>
+              </div>
+              <input
+                type="range"
+                min={0.2}
+                max={4}
+                step={0.05}
+                value={globalTextureScale}
+                onChange={(e) => onGlobalTextureScaleChange(Number(e.target.value))}
+                disabled={locked}
+                className="w-full accent-action"
+              />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">控制整张设计画布的花纹大小和密度，默认 1。</p>
+            </PieceToolbarButton>
+            <PieceToolbarButton label="转" value={textureAngle}>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm font-semibold">全局旋转</span>
+                <span className="text-sm font-bold">{textureAngle}</span>
+              </div>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={textureAngle}
+                onChange={(e) => onTextureAngleChange(Number(e.target.value))}
+                disabled={locked}
+                className="w-full accent-action"
+              />
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">控制整张设计画布的纹理方向，默认 0 度。</p>
+            </PieceToolbarButton>
+            <button
+              className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 transition hover:-translate-y-0.5 ${
+                locked
+                  ? "bg-amber-100 text-amber-700 ring-amber-200"
+                  : "bg-white text-ink ring-line hover:bg-slate-50"
+              }`}
+              onClick={onToggleLocked}
+              title={locked ? "解锁全局画布" : "锁定全局画布"}
+            >
+              {locked ? "锁" : "开"}
+            </button>
+            <button
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-bold text-red-600 shadow ring-1 ring-line transition hover:-translate-y-0.5 hover:bg-red-50 disabled:opacity-50"
+              onClick={onResetGlobalFit}
+              disabled={locked}
+              title="重置全局参数"
+            >
+              重
+            </button>
+            <button
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-jade text-xs font-bold text-white shadow ring-1 ring-jade transition hover:-translate-y-0.5 disabled:opacity-50"
+              disabled={!canApplyGlobalFit || locked}
+              onClick={onApplyGlobalFit}
+              title="应用全局设计画布"
+            >
+              用
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -618,9 +853,10 @@ function DesignRegionOutline({
   const offsetY = piece.transform.offset_y || 0;
   const x = (piece.transform.design_x ?? piece.source_x) + offsetX;
   const y = (piece.transform.design_y ?? piece.source_y) + offsetY;
-  const width = piece.transform.design_width ?? piece.width;
-  const height = piece.transform.design_height ?? piece.height;
+  const width = piece.width;
+  const height = piece.height;
   const locked = Boolean(piece.transform.locked);
+  const isLinked = Boolean(piece.mirror_of);
   return (
     <>
       <Rect
@@ -630,9 +866,10 @@ function DesignRegionOutline({
         height={height}
         stroke={selected ? "#e05252" : "rgba(224,82,82,0.65)"}
         strokeWidth={outlineWidth}
+        opacity={isLinked ? 0.35 : 1}
         strokeScaleEnabled={false}
         dash={selected ? [] : [12, 8]}
-        draggable={selected && !locked}
+        draggable={selected && !locked && !isLinked}
         onClick={onSelect}
         onTap={onSelect}
         onDragEnd={(event) => {
@@ -651,75 +888,8 @@ function DesignRegionOutline({
         onClick={onSelect}
         onTap={onSelect}
       />
-      {selected && !locked && (
-        <>
-          <ResizeHandle x={x} y={y} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, offsetX, offsetY, nx, ny, "top_left", onChange)} />
-          <ResizeHandle x={x + width} y={y} cursor="nesw-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, offsetX, offsetY, nx, ny, "top_right", onChange)} />
-          <ResizeHandle x={x} y={y + height} cursor="nesw-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, offsetX, offsetY, nx, ny, "bottom_left", onChange)} />
-          <ResizeHandle x={x + width} y={y + height} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, offsetX, offsetY, nx, ny, "bottom_right", onChange)} />
-        </>
-      )}
     </>
   );
-}
-
-function ResizeHandle({ x, y, cursor, onMove }: { x: number; y: number; cursor: string; onMove: (x: number, y: number) => void }) {
-  return (
-    <Rect
-      x={x - 7}
-      y={y - 7}
-      width={14}
-      height={14}
-      fill="#ffffff"
-      stroke="#e05252"
-      strokeWidth={2}
-      draggable
-      onMouseEnter={(event) => {
-        const stage = event.target.getStage();
-        if (stage) stage.container().style.cursor = cursor;
-      }}
-      onMouseLeave={(event) => {
-        const stage = event.target.getStage();
-        if (stage) stage.container().style.cursor = "default";
-      }}
-      onDragEnd={(event) => {
-        event.cancelBubble = true;
-        onMove(Math.round(event.target.x() + 7), Math.round(event.target.y() + 7));
-      }}
-    />
-  );
-}
-
-function onResizeRegion(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  offsetX: number,
-  offsetY: number,
-  nextX: number,
-  nextY: number,
-  corner: "top_left" | "top_right" | "bottom_left" | "bottom_right",
-  onChange: (update: Partial<Piece["transform"]>) => void
-) {
-  const minSize = 24;
-  if (corner === "top_left") {
-    const right = x + width;
-    const bottom = y + height;
-    const nx = Math.min(nextX, right - minSize);
-    const ny = Math.min(nextY, bottom - minSize);
-    onChange({ design_x: nx - offsetX, design_y: ny - offsetY, design_width: right - nx, design_height: bottom - ny });
-  } else if (corner === "top_right") {
-    const bottom = y + height;
-    const ny = Math.min(nextY, bottom - minSize);
-    onChange({ design_y: ny - offsetY, design_width: Math.max(minSize, nextX - x), design_height: bottom - ny });
-  } else if (corner === "bottom_left") {
-    const right = x + width;
-    const nx = Math.min(nextX, right - minSize);
-    onChange({ design_x: nx - offsetX, design_width: right - nx, design_height: Math.max(minSize, nextY - y) });
-  } else {
-    onChange({ design_width: Math.max(minSize, nextX - x), design_height: Math.max(minSize, nextY - y) });
-  }
 }
 
 function DesignTextureBackground({
@@ -904,6 +1074,20 @@ function ZoomButton({ label, onClick, active }: { label: string; onClick: () => 
   );
 }
 
+function PieceToolbarButton({ label, value, children }: { label: string; value: string | number; children: ReactNode }) {
+  return (
+    <div className="group relative">
+      <button className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-bold text-ink shadow ring-1 ring-line transition hover:-translate-y-0.5 hover:bg-slate-50">
+        {label}
+      </button>
+      <div className="pointer-events-none absolute right-full top-1/2 mr-2 w-56 -translate-y-1/2 rounded-xl border border-line bg-white p-3 opacity-0 shadow-xl transition group-hover:pointer-events-auto group-hover:opacity-100">
+        <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function DimmedTextureLayer({
   piece,
   textureImage,
@@ -921,30 +1105,47 @@ function DimmedTextureLayer({
 }) {
   const frameScale = frame.width / Math.max(1, piece.width);
   const globalMode = piece.transform.mode === "global_canvas";
-  const rotation = globalMode ? piece.transform.design_rotation ?? 0 : piece.transform.rotation;
-  const cropX = wrapCropCoordinate((piece.transform.design_x ?? 0) + piece.transform.offset_x, textureImage.naturalWidth);
-  const cropY = wrapCropCoordinate((piece.transform.design_y ?? 0) + piece.transform.offset_y, textureImage.naturalHeight);
-  const crop = globalMode
+  const rotation = globalMode ? 0 : piece.transform.rotation;
+  const designX = (piece.transform.design_x ?? 0) + piece.transform.offset_x;
+  const designY = (piece.transform.design_y ?? 0) + piece.transform.offset_y;
+  const view = globalMode
     ? {
-        x: cropX,
-        y: cropY,
-        width: Math.max(1, piece.transform.design_width ?? piece.width),
-        height: Math.max(1, piece.transform.design_height ?? piece.height)
+        x: -frame.x / frameScale,
+        y: -frame.y / frameScale,
+        width: Math.max(1, stageWidth / frameScale),
+        height: Math.max(1, stageHeight / frameScale),
+        pixelWidth: stageWidth,
+        pixelHeight: stageHeight
       }
-    : undefined;
-  const tiledSample = useTiledTextureSample(textureImage, crop || null);
-  const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : piece.transform.offset_x * frameScale);
-  const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : piece.transform.offset_y * frameScale);
-  const basePatternSource = globalMode ? tiledSample || textureImage : textureImage;
+    : null;
+  const globalSample = useGlobalCanvasSample(textureImage, {
+    originX: designX,
+    originY: designY,
+    pieceWidth: piece.width,
+    pieceHeight: piece.height,
+    view,
+    scale: piece.transform.scale,
+    rotation: piece.transform.rotation,
+    mirrorX: piece.transform.mirror_x,
+    mirrorY: piece.transform.mirror_y
+  });
+  const basePatternSource = globalMode ? globalSample || textureImage : textureImage;
   const patternSource = useMemo(
     () => getMirroredTexture(basePatternSource, piece.transform.mirror_x || false, piece.transform.mirror_y || false),
     [basePatternSource, piece.transform.mirror_x, piece.transform.mirror_y]
   );
+  if (globalMode && globalSample) {
+    return (
+      <Layer scaleX={zoom} scaleY={zoom}>
+        <KonvaImage image={globalSample} x={0} y={0} width={stageWidth} height={stageHeight} opacity={0.25} listening={false} />
+      </Layer>
+    );
+  }
+  const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : piece.transform.offset_x * frameScale);
+  const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : piece.transform.offset_y * frameScale);
   const sourceWidth = ("naturalWidth" in patternSource ? patternSource.naturalWidth || patternSource.width : patternSource.width) || 1;
   const sourceHeight = ("naturalHeight" in patternSource ? patternSource.naturalHeight || patternSource.height : patternSource.height) || 1;
-  const patternScale = globalMode
-    ? frame.width / Math.max(1, (tiledSample ? tiledSample.width : textureImage.naturalWidth) || 1)
-    : piece.transform.scale * frameScale;
+  const patternScale = piece.transform.scale * frameScale;
   return (
     <Layer scaleX={zoom} scaleY={zoom}>
       <Rect
@@ -974,6 +1175,7 @@ function ClippedTextureLayer({
   frame,
   zoom = 1,
   draggable = false,
+  opacity = 1,
   onMove,
   onSelect
 }: {
@@ -983,23 +1185,35 @@ function ClippedTextureLayer({
   frame: { x: number; y: number; width: number; height: number };
   zoom?: number;
   draggable?: boolean;
+  opacity?: number;
   onMove?: (x: number, y: number) => void;
   onSelect?: () => void;
 }) {
   const frameScale = frame.width / Math.max(1, piece.width);
   const globalMode = piece.transform.mode === "global_canvas";
-  const cropX = wrapCropCoordinate((piece.transform.design_x ?? 0) + piece.transform.offset_x, textureImage.naturalWidth);
-  const cropY = wrapCropCoordinate((piece.transform.design_y ?? 0) + piece.transform.offset_y, textureImage.naturalHeight);
-  const crop = globalMode
-    ? {
-        x: cropX,
-        y: cropY,
-        width: Math.max(1, piece.transform.design_width ?? piece.width),
-        height: Math.max(1, piece.transform.design_height ?? piece.height)
-      }
-    : undefined;
-  const tiledSample = useTiledTextureSample(textureImage, crop || null);
-  const renderedImage = tiledSample || textureImage;
+  const designX = (piece.transform.design_x ?? 0) + piece.transform.offset_x;
+  const designY = (piece.transform.design_y ?? 0) + piece.transform.offset_y;
+  const globalSample = useGlobalCanvasSample(textureImage, {
+    originX: designX,
+    originY: designY,
+    pieceWidth: piece.width,
+    pieceHeight: piece.height,
+    view: globalMode
+      ? {
+          x: 0,
+          y: 0,
+          width: piece.width,
+          height: piece.height,
+          pixelWidth: Math.max(1, Math.round(frame.width)),
+          pixelHeight: Math.max(1, Math.round(frame.height))
+        }
+      : null,
+    scale: piece.transform.scale,
+    rotation: piece.transform.rotation,
+    mirrorX: piece.transform.mirror_x,
+    mirrorY: piece.transform.mirror_y
+  });
+  const renderedImage = globalMode ? globalSample || textureImage : textureImage;
   const imageWidth = globalMode ? frame.width : Math.max(1, textureImage.naturalWidth * piece.transform.scale * frameScale);
   const imageHeight = globalMode ? frame.height : Math.max(1, textureImage.naturalHeight * piece.transform.scale * frameScale);
   const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : piece.transform.offset_x * frameScale);
@@ -1015,9 +1229,10 @@ function ClippedTextureLayer({
         height={imageHeight}
         offsetX={imageWidth / 2}
         offsetY={imageHeight / 2}
-        rotation={globalMode ? piece.transform.design_rotation ?? 0 : piece.transform.rotation}
-        scaleX={piece.transform.mirror_x ? -1 : 1}
-        scaleY={piece.transform.mirror_y ? -1 : 1}
+        rotation={globalMode ? 0 : piece.transform.rotation}
+        scaleX={!globalMode && piece.transform.mirror_x ? -1 : 1}
+        scaleY={!globalMode && piece.transform.mirror_y ? -1 : 1}
+        opacity={opacity}
         draggable={draggable && !piece.transform.locked}
         onClick={onSelect}
         onTap={onSelect}
@@ -1083,6 +1298,125 @@ function useTiledTextureSample(
   }, [textureImage, crop?.x, crop?.y, crop?.width, crop?.height]);
 }
 
+type GlobalCanvasSampleOptions = {
+  originX: number;
+  originY: number;
+  pieceWidth: number;
+  pieceHeight: number;
+  view: { x: number; y: number; width: number; height: number; pixelWidth: number; pixelHeight: number } | null;
+  scale: number;
+  rotation: number;
+  mirrorX?: boolean;
+  mirrorY?: boolean;
+};
+
+function useGlobalCanvasSample(textureImage: HTMLImageElement, options: GlobalCanvasSampleOptions) {
+  return useMemo(() => {
+    if (!options.view) return null;
+    const sourceWidth = textureImage.naturalWidth || textureImage.width;
+    const sourceHeight = textureImage.naturalHeight || textureImage.height;
+    if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+
+    const view = options.view;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(view.pixelWidth));
+    canvas.height = Math.max(1, Math.round(view.pixelHeight));
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+
+    const scale = Math.max(0.05, Number(options.scale || 1));
+    const rotation = Number(options.rotation || 0);
+    const angle = (rotation * Math.PI) / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const centerX = options.pieceWidth / 2;
+    const centerY = options.pieceHeight / 2;
+
+    const sourcePoint = (px: number, py: number) => {
+      const localX = options.mirrorX ? options.pieceWidth - px : px;
+      const localY = options.mirrorY ? options.pieceHeight - py : py;
+      const dx = localX - centerX;
+      const dy = localY - centerY;
+      return {
+        x: options.originX + centerX + (cos * dx + sin * dy) / scale,
+        y: options.originY + centerY + (-sin * dx + cos * dy) / scale
+      };
+    };
+
+    const corners = [
+      sourcePoint(view.x, view.y),
+      sourcePoint(view.x + view.width, view.y),
+      sourcePoint(view.x, view.y + view.height),
+      sourcePoint(view.x + view.width, view.y + view.height)
+    ];
+    const minX = Math.min(...corners.map((point) => point.x));
+    const minY = Math.min(...corners.map((point) => point.y));
+    const maxX = Math.max(...corners.map((point) => point.x));
+    const maxY = Math.max(...corners.map((point) => point.y));
+    const padding = 3;
+    const cropX = Math.floor(minX) - padding;
+    const cropY = Math.floor(minY) - padding;
+    const cropWidth = Math.max(1, Math.ceil(maxX) - cropX + padding);
+    const cropHeight = Math.max(1, Math.ceil(maxY) - cropY + padding);
+    const crop = createTiledTextureSample(textureImage, { x: cropX, y: cropY, width: cropWidth, height: cropHeight });
+    if (!crop) return null;
+
+    const pixelScaleX = canvas.width / Math.max(1, view.width);
+    const pixelScaleY = canvas.height / Math.max(1, view.height);
+    context.scale(pixelScaleX, pixelScaleY);
+    context.translate(-view.x, -view.y);
+    context.translate(centerX, centerY);
+    if (options.mirrorX || options.mirrorY) {
+      context.scale(options.mirrorX ? -1 : 1, options.mirrorY ? -1 : 1);
+    }
+    context.rotate(angle);
+    context.scale(scale, scale);
+    context.translate(cropX - options.originX - centerX, cropY - options.originY - centerY);
+    context.drawImage(crop, 0, 0);
+    return canvas;
+  }, [
+    textureImage,
+    options.originX,
+    options.originY,
+    options.pieceWidth,
+    options.pieceHeight,
+    options.view?.x,
+    options.view?.y,
+    options.view?.width,
+    options.view?.height,
+    options.view?.pixelWidth,
+    options.view?.pixelHeight,
+    options.scale,
+    options.rotation,
+    options.mirrorX,
+    options.mirrorY
+  ]);
+}
+
+function createTiledTextureSample(
+  textureImage: HTMLImageElement,
+  crop: { x: number; y: number; width: number; height: number }
+) {
+  const sourceWidth = textureImage.naturalWidth || textureImage.width;
+  const sourceHeight = textureImage.naturalHeight || textureImage.height;
+  if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+  const width = Math.max(1, Math.round(crop.width));
+  const height = Math.max(1, Math.round(crop.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  const offsetX = wrapCropCoordinate(crop.x, sourceWidth);
+  const offsetY = wrapCropCoordinate(crop.y, sourceHeight);
+  for (let y = -offsetY; y < height; y += sourceHeight) {
+    for (let x = -offsetX; x < width; x += sourceWidth) {
+      context.drawImage(textureImage, x, y, sourceWidth, sourceHeight);
+    }
+  }
+  return canvas;
+}
+
 function LayoutPieceTexture({
   piece,
   textureImage,
@@ -1107,12 +1441,14 @@ function LayoutPieceTexture({
       maskImage={alphaMask}
       frame={{ x: piece.source_x, y: piece.source_y, width: piece.width, height: piece.height }}
       zoom={zoom}
+      opacity={piece.mirror_of ? 0.45 : 1}
       onSelect={onSelect}
     />
   );
 }
 
 function PieceOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piece; selected: boolean; outlineWidth: number; onSelect: () => void }) {
+  const isLinked = Boolean(piece.mirror_of);
   return (
     <>
       <Rect
@@ -1123,11 +1459,11 @@ function PieceOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piec
         stroke="#e05252"
         strokeWidth={outlineWidth}
         strokeScaleEnabled={false}
-        opacity={selected ? 1 : 0.55}
+        opacity={selected ? (isLinked ? 0.5 : 1) : (isLinked ? 0.25 : 0.55)}
         onClick={onSelect}
         onTap={onSelect}
       />
-      <Text x={piece.source_x + 8} y={piece.source_y + 8} text={piece.name} fill="#e05252" fontSize={14} />
+      <Text x={piece.source_x + 8} y={piece.source_y + 8} text={piece.name} fill="#e05252" fontSize={14} opacity={isLinked ? 0.5 : 1} />
     </>
   );
 }

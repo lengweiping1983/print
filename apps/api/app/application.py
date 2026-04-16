@@ -29,7 +29,7 @@ from .image_ops import (
     make_red_marker_mask,
     make_red_marker_mask_from_image,
     render_layout,
-    render_piece,
+    render_piece_from_project_piece,
     render_piece_svg,
     write_piece_marker_masks,
 )
@@ -256,8 +256,9 @@ def _import_template_job(job_id: str, payload: dict) -> dict:
     stored_pieces = raw_pieces(project_id)
     design_canvas = build_design_canvas_config(stored_pieces, {"garment_type": "unknown"})
     design_canvas = carry_existing_design_canvas(project_id, design_canvas)
-    mappings = auto_map_pieces(stored_pieces, design_canvas, "unknown")
-    apply_piece_mappings(project_id, stored_pieces, mappings)
+    mappable_pieces = primary_pieces(stored_pieces)
+    mappings = auto_map_pieces(mappable_pieces, design_canvas, "unknown")
+    apply_piece_mappings(project_id, mappable_pieces, mappings)
     update_project_design_canvas(project_id, design_canvas)
     update_job_progress(job_id, 0.95)
     return {
@@ -948,16 +949,15 @@ def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dic
     if marker_src and marker_src.exists() and marker_dst:
         shutil.copyfile(marker_src, marker_dst)
 
-    # 读取基准 transforms（如果需要复制设计）
+    # 读取基准 transforms
     base_transforms: dict[str, dict] = {}
-    if payload.copy_design_from_base and not size_data.get("is_base"):
-        with connect() as con:
-            base_defs = con.execute(
-                "select * from set_piece_defs where set_id = ?", (payload.set_id,)
-            ).fetchall()
-            for bd in base_defs:
-                bd_data = row_to_dict(bd)
-                base_transforms[bd_data["id"]] = loads(bd_data.get("base_transform") or "{}", {})
+    with connect() as con:
+        base_defs = con.execute(
+            "select * from set_piece_defs where set_id = ?", (payload.set_id,)
+        ).fetchall()
+        for bd in base_defs:
+            bd_data = row_to_dict(bd)
+            base_transforms[bd_data["id"]] = loads(bd_data.get("base_transform") or "{}", {})
 
     # 复制 pieces
     pieces_data = list_size_template_pieces(size_id)
@@ -980,6 +980,8 @@ def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dic
                 created,
             ),
         )
+        piece_def_map: dict[str, str] = {}
+        piece_transform_map: dict[str, dict] = {}
         for index, piece in enumerate(pieces_data, start=1):
             # 复制 mask
             mask_src = storage_path(piece["mask_path"])
@@ -1045,6 +1047,37 @@ def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dic
                     piece["area"], piece["centroid_x"], piece["centroid_y"],
                     dumps(transform), created, created,
                 ),
+            )
+            piece_def_map[piece["piece_def_id"]] = piece_id
+            piece_transform_map[piece_id] = transform
+
+        # 第二遍：处理关联裁片（mirror_of）
+        for piece in pieces_data:
+            def_id = piece["piece_def_id"]
+            base_t = base_transforms.get(def_id, {})
+            linked_def_id = base_t.get("linked_def_id", "")
+            if not linked_def_id:
+                continue
+            source_piece_id = piece_def_map.get(linked_def_id)
+            linked_piece_id = piece_def_map.get(def_id)
+            if not source_piece_id or not linked_piece_id:
+                continue
+            source_transform = piece_transform_map[source_piece_id]
+            current_transform = piece_transform_map[linked_piece_id]
+            linked_transform = PieceTransform().model_dump()
+            linked_transform["mode"] = source_transform.get("mode", current_transform.get("mode", "global_canvas"))
+            linked_transform["piece_role"] = current_transform.get("piece_role", "")
+            linked_transform["role_confirmed"] = current_transform.get("role_confirmed", False)
+            linked_transform["fit_confidence"] = current_transform.get("fit_confidence", 0)
+            linked_transform["fit_note"] = "内容由关联裁片派生，不参与全局定位。"
+            linked_transform["global_enabled"] = False
+            linked_transform["locked"] = True
+            linked_transform["mirror_x"] = bool(base_t.get("link_mirror_x", False))
+            linked_transform["mirror_y"] = bool(base_t.get("link_mirror_y", False))
+            piece_transform_map[linked_piece_id] = linked_transform
+            con.execute(
+                "update pieces set mirror_of = ?, transform = ? where id = ?",
+                (source_piece_id, dumps(linked_transform), linked_piece_id),
             )
 
         con.execute(
@@ -1309,9 +1342,10 @@ def _auto_map_job(job_id: str, payload: dict) -> dict:
     pieces = raw_pieces(project_id)
     design_canvas = build_design_canvas_config(pieces, payload)
     design_canvas = carry_existing_design_canvas(project_id, design_canvas)
-    mappings = auto_map_pieces(pieces, design_canvas, payload.get("garment_type", "unknown"))
+    mappable_pieces = primary_pieces(pieces)
+    mappings = auto_map_pieces(mappable_pieces, design_canvas, payload.get("garment_type", "unknown"))
     if payload.get("apply", True):
-        apply_piece_mappings(project_id, pieces, mappings)
+        apply_piece_mappings(project_id, mappable_pieces, mappings)
         update_project_design_canvas(project_id, design_canvas)
         pieces = raw_pieces(project_id)
     return {
@@ -1334,12 +1368,13 @@ def _fit_global_job(job_id: str, payload: dict) -> dict:
     design_canvas["texture_repeat"] = fit_analysis["repeat_period"]
     design_canvas["texture_content"] = fit_analysis["content_centroid"]
     apply_content_alignment(design_canvas, fit_analysis["content_centroid"], texture_source)
-    mappings = auto_map_pieces(pieces, design_canvas, payload.get("garment_type", "unknown"))
+    mappable_pieces = primary_pieces(pieces)
+    mappings = auto_map_pieces(mappable_pieces, design_canvas, payload.get("garment_type", "unknown"))
     build_design_texture_canvas(texture_source_path, design_path, design_canvas, asset_paths(project_id))
     if payload.get("apply", True):
-        apply_piece_mappings(project_id, pieces, mappings)
+        apply_piece_mappings(project_id, mappable_pieces, mappings)
         pieces = raw_pieces(project_id)
-        design_canvas["safety_report"] = build_safety_report(pieces, design_canvas)
+        design_canvas["safety_report"] = build_safety_report(primary_pieces(pieces), design_canvas)
         update_project_design_canvas(project_id, design_canvas)
         with connect() as con:
             con.execute(
@@ -1375,7 +1410,7 @@ def _render_design_canvas_job(job_id: str, payload: dict) -> dict:
         pieces = raw_pieces(project_id)
         design_canvas = build_design_canvas_config(pieces, {})
     pieces = raw_pieces(project_id)
-    design_canvas["safety_report"] = build_safety_report(pieces, design_canvas)
+    design_canvas["safety_report"] = build_safety_report(primary_pieces(pieces), design_canvas)
     design_path = project_dir(project_id) / "textures" / f"{texture['id']}_design_canvas.png"
     texture_source_path, texture_source, _ = resolve_texture_source(texture, texture.get("fit_source"))
     build_design_texture_canvas(texture_source_path, design_path, design_canvas, asset_paths(project_id))
@@ -1424,15 +1459,16 @@ def _export_job(job_id: str, payload: dict) -> dict:
     project = get_project_dict(project_id)
     design_canvas = dict((project.get("export_config") or {}).get("design_canvas") or {})
     if design_canvas:
-        design_canvas["safety_report"] = build_safety_report(pieces, design_canvas)
+        design_canvas["safety_report"] = build_safety_report(primary_pieces(pieces), design_canvas)
         update_project_design_canvas(project_id, design_canvas)
     export_dir = project_dir(project_id) / "exports" / f"export_{uuid.uuid4().hex[:8]}"
     export_dir.mkdir(parents=True, exist_ok=True)
     single_files = []
     svg_files = []
+    pieces_by_id = {str(piece["id"]): piece for piece in pieces}
     for piece in pieces:
         out = export_dir / f"{piece['id']}.png"
-        render_piece(Path(piece["mask_path"]), texture_file(texture), piece["transform"], out)
+        render_piece_from_project_piece(piece, texture_file(texture), out, pieces_by_id)
         single_files.append(rel_path(out))
         svg_out = export_dir / f"{piece['id']}.svg"
         render_piece_svg(Path(piece["mask_path"]), svg_out)
@@ -1609,6 +1645,10 @@ def raw_pieces(project_id: str) -> list[dict]:
     if not pieces:
         raise RuntimeError("No pieces imported")
     return pieces
+
+
+def primary_pieces(pieces: list[dict]) -> list[dict]:
+    return [piece for piece in pieces if not piece.get("mirror_of")]
 
 
 def apply_piece_mappings(project_id: str, pieces: list[dict], mappings: list[dict]) -> None:

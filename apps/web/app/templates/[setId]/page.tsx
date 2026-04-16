@@ -196,6 +196,16 @@ export default function TemplateSetDetailPage() {
     setNotice("角色已更新");
   }
 
+  async function updateDefLink(defId: string, linkedDefId: string, linkMirrorX: boolean, linkMirrorY: boolean) {
+    if (!setId) return;
+    const def = pieceDefs.find((d) => d.id === defId);
+    if (!def) return;
+    const baseTransform = { ...def.base_transform, linked_def_id: linkedDefId, link_mirror_x: linkMirrorX, link_mirror_y: linkMirrorY };
+    await api.patchTemplateSetPieceDef(setId, defId, { base_transform: baseTransform });
+    await refresh();
+    setNotice("关联关系已更新");
+  }
+
   async function deleteDef(defId: string) {
     if (!setId) return;
     if (!confirm("确定删除该裁片定义吗？删除后所有尺寸中关联到该定义的裁片将变为未关联。")) return;
@@ -435,6 +445,59 @@ export default function TemplateSetDetailPage() {
                             </option>
                           ))}
                         </select>
+                        <select
+                          className="w-full rounded border border-line bg-white px-2 py-1 text-xs"
+                          value={def.base_transform?.linked_def_id || ""}
+                          onChange={(e) => {
+                            const linked = e.target.value;
+                            const mx = Boolean(def.base_transform?.link_mirror_x);
+                            const my = Boolean(def.base_transform?.link_mirror_y);
+                            updateDefLink(def.id, linked, mx, my);
+                          }}
+                        >
+                          <option value="">不关联</option>
+                          {pieceDefs
+                            .filter((d) => d.id !== def.id)
+                            .map((d) => (
+                              <option key={d.id} value={d.id}>
+                                同 {d.name}
+                              </option>
+                            ))}
+                        </select>
+                        {def.base_transform?.linked_def_id && (
+                          <div className="flex gap-2 text-[10px]">
+                            <label className="flex items-center gap-1 rounded border border-line px-1.5 py-0.5">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(def.base_transform?.link_mirror_x)}
+                                onChange={(e) => {
+                                  updateDefLink(
+                                    def.id,
+                                    String(def.base_transform?.linked_def_id || ""),
+                                    e.target.checked,
+                                    Boolean(def.base_transform?.link_mirror_y)
+                                  );
+                                }}
+                              />
+                              左右镜像
+                            </label>
+                            <label className="flex items-center gap-1 rounded border border-line px-1.5 py-0.5">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(def.base_transform?.link_mirror_y)}
+                                onChange={(e) => {
+                                  updateDefLink(
+                                    def.id,
+                                    String(def.base_transform?.linked_def_id || ""),
+                                    Boolean(def.base_transform?.link_mirror_x),
+                                    e.target.checked
+                                  );
+                                }}
+                              />
+                              上下镜像
+                            </label>
+                          </div>
+                        )}
                       </div>
                       <button
                         onClick={() => deleteDef(def.id)}

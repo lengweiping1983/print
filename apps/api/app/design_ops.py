@@ -54,7 +54,9 @@ def build_safety_report(pieces: list[dict[str, Any]], design_canvas: dict[str, A
     global_pieces = [
         piece
         for piece in pieces
-        if piece.get("transform", {}).get("mode") == "global_canvas" and piece.get("transform", {}).get("global_enabled", True)
+        if not piece.get("mirror_of")
+        and piece.get("transform", {}).get("mode") == "global_canvas"
+        and piece.get("transform", {}).get("global_enabled", True)
     ]
     for layer in layers:
         rect = _layer_rect(layer)
@@ -204,8 +206,8 @@ def _piece_design_rect(piece: dict[str, Any]) -> dict[str, float]:
     return {
         "x": float(transform.get("design_x", piece.get("source_x", 0)) or 0) + float(transform.get("offset_x", 0) or 0),
         "y": float(transform.get("design_y", piece.get("source_y", 0)) or 0) + float(transform.get("offset_y", 0) or 0),
-        "width": max(1, float(transform.get("design_width", piece.get("width", 1)) or 1)),
-        "height": max(1, float(transform.get("design_height", piece.get("height", 1)) or 1)),
+        "width": max(1, float(piece.get("width", 1) or 1)),
+        "height": max(1, float(piece.get("height", 1) or 1)),
     }
 
 

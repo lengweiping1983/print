@@ -234,28 +234,29 @@ def test_repeated_tile_helpers_expand_small_tiles_only() -> None:
     repeated.close()
 
 
-def test_render_piece_from_design_canvas_samples_shared_region(tmp_path: Path) -> None:
+def test_render_piece_from_design_canvas_ignores_legacy_sample_size(tmp_path: Path) -> None:
     mask = tmp_path / "piece_mask.png"
     Image.new("L", (20, 20), 255).save(mask)
     design = tmp_path / "design.png"
-    image = Image.new("RGBA", (80, 40), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, 39, 39), fill=(255, 0, 0, 255))
-    draw.rectangle((40, 0, 79, 39), fill=(0, 80, 255, 255))
+    image = Image.new("RGBA", (80, 20), (0, 0, 0, 0))
+    pixels = image.load()
+    assert pixels is not None
+    for y in range(20):
+        for x in range(80):
+            pixels[x, y] = (x * 3, 80, 200, 255)
     image.save(design)
 
     out = tmp_path / "piece.png"
     render_piece_from_design_canvas(
         mask,
         design,
-        {"mode": "global_canvas", "design_x": 40, "design_y": 0, "design_width": 20, "design_height": 20},
+        {"mode": "global_canvas", "design_x": 10, "design_y": 0, "design_width": 40, "design_height": 40},
         out,
     )
 
     rendered = Image.open(out).convert("RGBA")
-    pixel = rendered.getpixel((10, 10))
-    assert pixel[2] > 200
-    assert pixel[0] < 50
+    assert rendered.size == (20, 20)
+    assert rendered.getpixel((10, 10)) == image.getpixel((20, 10))
 
 
 def test_render_piece_from_design_canvas_applies_local_offset(tmp_path: Path) -> None:
@@ -272,7 +273,7 @@ def test_render_piece_from_design_canvas_applies_local_offset(tmp_path: Path) ->
     render_piece_from_design_canvas(
         mask,
         design,
-        {"mode": "global_canvas", "design_x": 0, "design_y": 0, "offset_x": 40, "design_width": 20, "design_height": 20},
+        {"mode": "global_canvas", "design_x": 0, "design_y": 0, "offset_x": 40, "design_width": 40, "design_height": 40},
         out,
     )
 
@@ -280,3 +281,86 @@ def test_render_piece_from_design_canvas_applies_local_offset(tmp_path: Path) ->
     pixel = rendered.getpixel((10, 10))
     assert pixel[2] > 200
     assert pixel[0] < 50
+
+
+def test_render_piece_from_design_canvas_applies_piece_scale_after_global_sample(tmp_path: Path) -> None:
+    mask = tmp_path / "piece_mask.png"
+    Image.new("L", (20, 20), 255).save(mask)
+    design = tmp_path / "design.png"
+    image = Image.new("RGBA", (80, 20), (0, 0, 0, 0))
+    pixels = image.load()
+    assert pixels is not None
+    for y in range(20):
+        for x in range(80):
+            pixels[x, y] = (x * 3, 80, 200, 255)
+    image.save(design)
+
+    out = tmp_path / "piece.png"
+    render_piece_from_design_canvas(
+        mask,
+        design,
+        {"mode": "global_canvas", "design_x": 10, "design_y": 0, "scale": 2, "rotation": 0},
+        out,
+    )
+
+    rendered = Image.open(out).convert("RGBA")
+    zoomed_pixel = rendered.getpixel((15, 10))
+    unscaled_pixel = image.getpixel((25, 10))
+    assert zoomed_pixel[0] < unscaled_pixel[0]
+    assert abs(zoomed_pixel[0] - image.getpixel((22, 10))[0]) <= 8
+
+
+def test_render_layout_derives_linked_piece_content_from_source(tmp_path: Path) -> None:
+    texture = tmp_path / "texture.png"
+    tex = Image.new("RGBA", (4, 3), (0, 0, 0, 0))
+    for y in range(3):
+        for x in range(4):
+            tex.putpixel((x, y), (20 + x * 40, 30 + y * 50, 180, 255))
+    tex.save(texture)
+
+    source_mask = tmp_path / "source_mask.png"
+    linked_mask = tmp_path / "linked_mask.png"
+    Image.new("L", (4, 3), 255).save(source_mask)
+    Image.new("L", (4, 3), 255).save(linked_mask)
+
+    variants = [
+        (False, False, "same"),
+        (True, False, "mirror_x"),
+        (False, True, "mirror_y"),
+        (True, True, "mirror_xy"),
+    ]
+    for mirror_x, mirror_y, label in variants:
+        out = tmp_path / f"{label}.png"
+        pieces = [
+            {
+                "id": "source",
+                "mask_path": source_mask,
+                "bbox": {"x": 0, "y": 0, "width": 4, "height": 3},
+                "source_x": 0,
+                "source_y": 0,
+                "width": 4,
+                "height": 3,
+                "mirror_of": "",
+                "transform": {"offset_x": 1, "offset_y": 0, "scale": 1, "rotation": 0},
+            },
+            {
+                "id": "linked",
+                "mask_path": linked_mask,
+                "bbox": {"x": 4, "y": 0, "width": 4, "height": 3},
+                "source_x": 4,
+                "source_y": 0,
+                "width": 4,
+                "height": 3,
+                "mirror_of": "source",
+                "transform": {"mirror_x": mirror_x, "mirror_y": mirror_y},
+            },
+        ]
+        render_layout(pieces, texture, out, (8, 3), include_outline=False, include_labels=False)
+        rendered = Image.open(out).convert("RGBA")
+
+        for y in range(3):
+            for x in range(4):
+                source_pixel = rendered.getpixel((x, y))
+                linked_x = 4 + (3 - x if mirror_x else x)
+                linked_y = 2 - y if mirror_y else y
+                assert rendered.getpixel((linked_x, linked_y)) == source_pixel

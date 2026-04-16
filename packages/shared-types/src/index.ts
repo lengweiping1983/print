@@ -50,6 +50,10 @@ export type PieceTransform = {
   avoid_zones?: DesignRect[];
   fit_confidence?: number;
   fit_note?: string;
+  // 模板套装级关联配置（存储在 set_piece_defs.base_transform 中）
+  linked_def_id?: string;
+  link_mirror_x?: boolean;
+  link_mirror_y?: boolean;
 };
 
 export type DesignRect = {
