@@ -10,7 +10,7 @@
 
 1. 创建项目并上传透明 PNG/WebP 裁片模板。
 2. 后端按 alpha 连通域自动拆分裁片，保存 mask、bbox、坐标和 transform。
-3. 上传图案/衣服参考图，或用 prompt 调用 AI 生图纹理。
+3. 上传图案/衣服参考图，或用 prompt 调用 AI 生图面料。
 4. 生成镜像或 offset 无缝大布料图。
 5. 在 Web 工作台中调节单裁片的平移、缩放、旋转、镜像，支持画布直接拖拽。
 6. 导出整套预览 PNG、单裁片透明 PNG、manifest JSON 和 ZIP 打样包。
@@ -42,7 +42,7 @@ print/
 │   │   │   ├── db.py                # SQLite 连接、schema、JSON 辅助
 │   │   │   ├── image_ops.py         # Pillow 图像算法（拆片、无缝化、渲染）
 │   │   │   ├── jobs.py              # 基于 ThreadPoolExecutor 的异步任务队列
-│   │   │   ├── providers.py         # AI 纹理生成 provider（local / openai / replicate）
+│   │   │   ├── providers.py         # AI 面料生成 provider（local / openai / replicate）
 │   │   │   └── config.py            # 路径与常量配置
 │   │   ├── tests/
 │   │   │   ├── conftest.py          # pytest 路径注入
@@ -134,9 +134,9 @@ npm run typecheck
 | `POST /api/projects/{id}/templates/import` | 导入模板并按 alpha 拆裁片 |
 | `GET /api/projects/{id}/pieces` | 列出裁片（按面积降序） |
 | `PATCH /api/projects/{id}/pieces/{piece_id}` | 更新裁片 transform |
-| `POST /api/projects/{id}/textures/generate` | 创建纹理生成任务 |
+| `POST /api/projects/{id}/textures/generate` | 创建面料生成任务 |
 | `POST /api/projects/{id}/textures/{texture_id}/seamless` | 创建无缝化任务（mirror/offset） |
-| `GET /api/projects/{id}/textures` | 列出纹理 |
+| `GET /api/projects/{id}/textures` | 列出面料 |
 | `POST /api/projects/{id}/render/preview` | 创建整套预览渲染任务 |
 | `POST /api/projects/{id}/exports` | 创建导出 ZIP 任务 |
 | `GET /api/jobs/{job_id}` | 查询任务状态 |
@@ -160,7 +160,7 @@ SQLite 核心表：
 - `projects`：项目基础信息（dpi、unit、canvas 尺寸、export_config）
 - `assets`：上传的原始素材（kind、path、sha256、metadata）
 - `pieces`：拆分后的裁片（mask_path、polygon、bbox、source_x/y、transform JSON）
-- `textures`：纹理记录（source_path、seamless_path、provider、prompt）
+- `textures`：面料记录（source_path、seamless_path、provider、prompt）
 - `jobs`：异步任务记录（status、progress、input/output JSON）
 - `template_sets`：模板套装（名称、衣服类型、版本、基准尺寸 ID、design_canvas）
 - `set_piece_defs`：套装级裁片定义（piece_role、name、sort_order、base_transform）
@@ -175,10 +175,10 @@ SQLite 核心表：
 - `match_pieces_to_base`（`template_ops.py`）：将新尺寸拆出的裁片按面积、长宽比、水平位置匹配到基准模板的 `piece_def_id`，并计算 `scale_to_base`。
 - `make_mirror_tile`：2x2 镜像平铺生成无缝图。
 - `make_offset_tile`：Offset 位移法生成无缝图。
-- `render_piece`：按 transform（scale、rotation、mirror、offset）将纹理渲染到单裁片 mask 上。
+- `render_piece`：按 transform（scale、rotation、mirror、offset）将面料渲染到单裁片 mask 上。
 - `render_layout`：将所有裁片按原始坐标回排，绘制边框与标签，输出整套预览。
 
-### AI 纹理生成（providers.py）
+### AI 面料生成（providers.py）
 
 支持三种 provider：
 
@@ -197,7 +197,7 @@ SQLite 核心表：
 - `StudioPage.tsx`：主页面，状态驱动。挂载时自动创建项目。核心状态包括 `project`、`pieces`、`textures`、`selectedPieceId`、`job`。支持"从模板套装创建"快捷入口。
 - `KonvaWorkspace.tsx`：双画布交互区。
 - `templates/*.tsx`：模板套装配置管理页面。支持上传多尺寸白底图、自动拆片识别、设定基准尺寸、手动修正裁片关联。
-  - 左侧「单片校正」：显示当前选中裁片的 mask 轮廓 + 可拖拽的纹理图，支持鼠标拖动微调花位。
+  - 左侧「单片校正」：显示当前选中裁片的 mask 轮廓 + 可拖拽的面料图，支持鼠标拖动微调花位。
   - 右侧「整套排版」：按原始 source_x/source_y 显示所有裁片边框，可点击选中，支持缩放适配。
 
 ### API 客户端（lib/api.ts）
@@ -244,7 +244,7 @@ SQLite 核心表：
 |------|---------|
 | 新增/修改 API 接口 | `apps/api/app/main.py` + `apps/api/app/schemas.py` |
 | 修改图像算法（拆片、无缝化、渲染） | `apps/api/app/image_ops.py` |
-| 新增 AI 纹理 provider | `apps/api/app/providers.py` |
+| 新增 AI 面料 provider | `apps/api/app/providers.py` |
 | 调整前端页面布局与交互 | `apps/web/components/StudioPage.tsx` |
 | 调整画布行为（拖拽、缩放、选中） | `apps/web/components/KonvaWorkspace.tsx` |
 | 新增前后端共享类型 | `packages/shared-types/src/index.ts` + `apps/api/app/schemas.py` |

@@ -52,7 +52,7 @@ SEAMLESS_KEYWORDS = {
     "花卉",
     "满版",
     "布料",
-    "纹理",
+    "面料",
     "底纹",
     "连续",
     "重复",
@@ -83,7 +83,7 @@ def analyze_texture_fit_source(
         reasons.append(f"命中定位图案关键词：{', '.join(source_hits[:4])}。")
     if seamless_hits:
         seamless_score += 2.0 + min(1.0, len(seamless_hits) * 0.2)
-        reasons.append(f"命中满版纹理关键词：{', '.join(seamless_hits[:4])}。")
+        reasons.append(f"命中满版面料关键词：{', '.join(seamless_hits[:4])}。")
 
     image_stats = _image_stats(image_path)
     transparent_ratio = image_stats["transparent_ratio"]
@@ -97,11 +97,11 @@ def analyze_texture_fit_source(
         reasons.append("图片整体不透明且边缘连续性一般，适合先做无缝预处理。")
     else:
         seamless_score += 0.35
-        reasons.append("图片整体不透明，允许作为满版纹理平铺。")
+        reasons.append("图片整体不透明，允许作为满版面料平铺。")
 
     if not source_hits and not seamless_hits and source_type in {"ai", "library"}:
         seamless_score += 0.6
-        reasons.append("生成纹理默认偏向满版纹理。")
+        reasons.append("生成面料默认偏向满版面料。")
 
     delta = seamless_score - source_score
     if delta >= 1.0:

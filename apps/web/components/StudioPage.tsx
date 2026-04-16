@@ -395,7 +395,7 @@ export function StudioPage() {
         const asset = await upload(sourceType === "garment_photo" ? "garment_photo" : "pattern", file);
         assetId = asset?.id ?? "";
       }
-      setNotice("正在生成纹理任务...");
+      setNotice("正在生成面料任务...");
       const created = await api.generateTexture(project.id, assetId, sourceType, texturePrompt);
       const done = await waitForJob(created.job_id, setJob);
       const texture = done.output.texture as Texture;
@@ -440,7 +440,7 @@ export function StudioPage() {
   async function handleGlobalFit() {
     if (!project || !activeTexture) return;
     try {
-      setNotice("正在生成全局一致纹理画布并裁切预览...");
+      setNotice("正在生成全局一致面料画布并裁切预览...");
       const options: GlobalFitOptions = {
         garment_type: garmentType,
         texture_scale: globalTextureScale,
@@ -533,7 +533,7 @@ export function StudioPage() {
 
   async function addImageLayer() {
     if (!canUseLayers || !designCanvas) {
-      setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
+      setNotice("请先上传或生成面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
       return;
     }
     const asset = assets.find((item) => item.kind === "pattern" || item.kind === "garment_photo");
@@ -550,7 +550,7 @@ export function StudioPage() {
 
   async function handleLayerUpload(file: File) {
     if (!project || !designCanvas) {
-      setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
+      setNotice("请先上传或生成面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
       return;
     }
     setNotice(`上传 ${file.name}...`);
@@ -566,7 +566,7 @@ export function StudioPage() {
 
   async function handleLayerAiImage() {
     if (!project || !designCanvas) {
-      setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
+      setNotice("请先上传或生成面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
       return;
     }
     const trimmedPrompt = layerPrompt.trim();
@@ -581,7 +581,6 @@ export function StudioPage() {
       const created = await api.generateTexture(project.id, "", "ai", trimmedPrompt);
       const done = await waitForJob(created.job_id, setJob);
       const texture = done.output.texture as Texture;
-      setTextures((current) => [texture, ...current]);
       const layer = createLayer("image", designCanvas);
       const width = Math.min(520, Math.max(180, texture.width || 360));
       const height = Math.min(520, Math.max(180, texture.height || 360));
@@ -605,7 +604,7 @@ export function StudioPage() {
 
   async function addTextLayer() {
     if (!canUseLayers || !designCanvas) {
-      setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
+      setNotice("请先上传或生成面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
       return;
     }
     const layer = createLayer("text", designCanvas);
@@ -803,11 +802,11 @@ export function StudioPage() {
           </Panel>
 
           <Panel
-            title="纹理"
+            title="面料"
             action={
               <div className="flex gap-2">
                 <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
-                  上传布料
+                  上传面料
                 </button>
                 <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
                   上传衣服
@@ -843,7 +842,7 @@ export function StudioPage() {
               />
               <div className="relative">
                 {activeTexture ? (
-                  <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前纹理" />
+                  <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前面料" />
                 ) : (
                   <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm text-slate-500">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -851,12 +850,12 @@ export function StudioPage() {
                       <circle cx="8.5" cy="8.5" r="1.5" />
                       <polyline points="21 15 16 10 5 21" />
                     </svg>
-                    暂无纹理
+                    暂无面料
                   </div>
                 )}
               </div>
               <p className="m-0 text-xs text-slate-500">
-                {activeTexture ? `纹理大小：${activeTexture.width} x ${activeTexture.height}` : "纹理大小：未生成"}
+                {activeTexture ? `面料大小：${activeTexture.width} x ${activeTexture.height}` : "面料大小：未生成"}
               </p>
               {activeTexture ? (
                 <>
@@ -883,7 +882,7 @@ export function StudioPage() {
                   </button>
                 </div>
                 <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-                  当前适配输入：{textureViewMode === "seamless" && hasSeamlessTexture ? "无缝图" : "原图"}。无缝处理适合满版纹理；透明底主体图案建议使用原图定位。
+                  当前适配输入：{textureViewMode === "seamless" && hasSeamlessTexture ? "无缝图" : "原图"}。无缝处理适合满版面料；透明底主体图案建议使用原图定位。
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={() => handleSeamless("mirror")}>
@@ -895,7 +894,7 @@ export function StudioPage() {
                 </div>
                 </>
               ) : (
-                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">上传布料、上传衣服复刻，或使用 AI 生图纹理。</p>
+                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">上传面料、上传衣服复刻，或使用 AI 生图面料。</p>
               )}
             </div>
 
@@ -930,7 +929,7 @@ export function StudioPage() {
                   <option value="hem_center">下摆中心</option>
                   <option value="sleeve_center">袖中线</option>
                 </select>
-                <span className="text-xs leading-5 text-slate-500">决定 logo、鱼、文字等主体优先对齐的位置；满版纹理影响较小。</span>
+                <span className="text-xs leading-5 text-slate-500">决定 logo、鱼、文字等主体优先对齐的位置；满版面料影响较小。</span>
               </label>
               <div className="grid gap-2 rounded-lg border border-line bg-white p-3">
                 <div className="flex items-center justify-between gap-3">
@@ -1039,7 +1038,7 @@ export function StudioPage() {
               />
               {designLayers.length === 0 && (
                 <p className="m-0 text-xs leading-5 text-slate-500">
-                  先完成“自动适配纹理”，生成全局设计画布后，可添加 logo、主图或号码文字。
+                  先完成“自动适配面料”，生成全局设计画布后，可添加 logo、主图或号码文字。
                 </p>
               )}
               <div className="grid gap-2">
@@ -1223,12 +1222,6 @@ export function StudioPage() {
               <div className="flex gap-2">
                 <button type="button" className="rounded-lg border border-line bg-white px-4 py-3 text-xs text-slate-600">
                   风格
-                </button>
-                <button type="button" className="rounded-lg border border-line bg-white px-4 py-3 text-xs text-slate-600">
-                  标记
-                </button>
-                <button type="button" className="rounded-lg border border-line bg-white px-4 py-3 text-xs text-slate-600">
-                  聚焦
                 </button>
               </div>
               <button type="button" className="rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" onClick={() => setShowAiTextureDialog(false)}>

@@ -494,7 +494,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
         <Layer>
           <Rect x={0} y={0} width={stageWidth} height={stageHeight} fill="#ffffff" />
           {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
-          {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
+          {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成面料" fill="#64748b" fontSize={18} />}
         </Layer>
         {textureImage && displayPiece && selectedMaskFrame && (
           <DimmedTextureLayer
@@ -939,7 +939,7 @@ export function LayoutPreview({
                 disabled={locked}
                 className="w-full accent-action"
               />
-              <p className="mt-1.5 text-xs leading-5 text-slate-500">控制整张设计画布的纹理方向，默认 0 度。</p>
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">控制整张设计画布的面料方向，默认 0 度。</p>
             </PieceToolbarButton>
             <button
               className="flex h-9 w-9 items-center justify-center rounded-full bg-jade text-xs font-bold text-white shadow ring-1 ring-jade transition hover:-translate-y-0.5 disabled:opacity-50"
@@ -1384,18 +1384,18 @@ function ToolbarSnapButton({
       <div className={`absolute right-full top-0 h-full w-3 ${popover.visible ? "pointer-events-auto" : "pointer-events-none"}`} />
       <div className={`absolute right-full top-1/2 w-56 -translate-y-1/2 -translate-x-2 rounded-xl border border-line bg-white p-3 shadow-xl transition ${popover.visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>
         <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
-        <p className="text-sm font-semibold">吸附到纹理周期</p>
+        <p className="text-sm font-semibold">吸附到面料周期</p>
         {hasRepeat ? (
           <>
             <p className="mt-1.5 text-xs leading-5 text-slate-500">
-              将取样坐标对齐到纹理周期的最近整数倍，确保接缝处花型连续。
+              将取样坐标对齐到面料周期的最近整数倍，确保接缝处花型连续。
             </p>
             <p className="mt-1 text-xs text-slate-400">
               周期: X={periodX > 0 ? `${Math.round(periodX)}px` : "未检测"} &nbsp; Y={periodY > 0 ? `${Math.round(periodY)}px` : "未检测"}
             </p>
           </>
         ) : (
-          <p className="mt-1.5 text-xs leading-5 text-slate-500">当前纹理无可检测的重复周期，吸附不可用。</p>
+          <p className="mt-1.5 text-xs leading-5 text-slate-500">当前面料无可检测的重复周期，吸附不可用。</p>
         )}
       </div>
     </div>

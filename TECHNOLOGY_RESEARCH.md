@@ -9,9 +9,9 @@
 
 1. [项目技术架构总览](#1-项目技术架构总览)
 2. [图像分割：Alpha 通道与连通域分析](#2-图像分割alpha-通道与连通域分析)
-3. [无缝纹理生成技术](#3-无缝纹理生成技术)
+3. [无缝面料生成技术](#3-无缝面料生成技术)
 4. [图像变换、重采样与渲染合成](#4-图像变换重采样与渲染合成)
-5. [AI 纹理生成与 Provider 架构](#5-ai-纹理生成与-provider-架构)
+5. [AI 面料生成与 Provider 架构](#5-ai-面料生成与-provider-架构)
 6. [FastAPI 后端设计与异步任务队列](#6-fastapi-后端设计与异步任务队列)
 7. [前端架构：Next.js 16 + React 19 + Konva](#7-前端架构nextjs-16--react-19--konva)
 8. [数据持久化与 SQLite 设计模式](#8-数据持久化与-sqlite-设计模式)
@@ -31,13 +31,13 @@
     ↓
 生成多个裁片 Mask（灰度图）+ bbox/polygon/centroid 元数据
     ↓
-用户上传图案 / 输入 Prompt → AI Provider 生成纹理
+用户上传图案 / 输入 Prompt → AI Provider 生成面料
     ↓
 无缝化（Mirror Tile 或 Offset）→ 生成大尺寸布料图
     ↓
 Konva 画布交互：单片校正（平移/缩放/旋转/镜像）
     ↓
-后端渲染：纹理按 Transform 映射到各裁片 Mask
+后端渲染：面料按 Transform 映射到各裁片 Mask
     ↓
 导出：单裁片 PNG + 整套排版预览 + Manifest JSON + ZIP
 ```
@@ -125,13 +125,13 @@ while queue:
 
 ### 2.5 掩码（Mask）生成
 
-每个裁片被提取为一个独立的灰度图（L 模式），有效区域像素值为 255，背景为 0。这种黑白掩码在后续渲染中作为 `putalpha` 的裁剪依据，实现**非矩形纹理映射**。
+每个裁片被提取为一个独立的灰度图（L 模式），有效区域像素值为 255，背景为 0。这种黑白掩码在后续渲染中作为 `putalpha` 的裁剪依据，实现**非矩形面料映射**。
 
 ---
 
-## 3. 无缝纹理生成技术
+## 3. 无缝面料生成技术
 
-无缝纹理（Seamless Texture）是纺织品设计中的核心需求，要求纹理在水平和垂直方向无限平铺时，边界处没有明显接缝。
+无缝面料（Seamless Texture）是纺织品设计中的核心需求，要求面料在水平和垂直方向无限平铺时，边界处没有明显接缝。
 
 ### 3.1 镜像平铺法（Mirror Tile / Wang Tile）
 
@@ -179,9 +179,9 @@ canvas = ImageChops.offset(canvas, width // 2, height // 2)
 | 技术 | 原理 | 适用场景 |
 |------|------|----------|
 | **Poisson Blending** | 在梯度域求解 Laplace 方程，平滑边界 | 修缝后的自然过渡 |
-| **Perceptual Seamlessness (GAN)** | 使用 CycleGAN/StyleGAN 学习纹理周期性 | AI 自动生成复杂花型的无缝图 |
-| **Quilting / Efros-Freeman** | 从样本图中提取最佳匹配块拼接 | 基于照片生成大尺寸无缝纹理 |
-| **Torioidal Convolution** | 将卷积核在环面上运算，保证周期性 | 程序化噪声纹理（Perlin Noise） |
+| **Perceptual Seamlessness (GAN)** | 使用 CycleGAN/StyleGAN 学习面料周期性 | AI 自动生成复杂花型的无缝图 |
+| **Quilting / Efros-Freeman** | 从样本图中提取最佳匹配块拼接 | 基于照片生成大尺寸无缝面料 |
+| **Torioidal Convolution** | 将卷积核在环面上运算，保证周期性 | 程序化噪声面料（Perlin Noise） |
 
 ---
 
@@ -189,7 +189,7 @@ canvas = ImageChops.offset(canvas, width // 2, height // 2)
 
 ### 4.1 放射变换（Affine Transform）
 
-在 `render_piece` 中，纹理需要经过缩放、旋转、镜像、平移四步变换后映射到裁片上：
+在 `render_piece` 中，面料需要经过缩放、旋转、镜像、平移四步变换后映射到裁片上：
 
 ```python
 scale → mirror_x/mirror_y → rotation → offset_x/offset_y
@@ -240,9 +240,9 @@ Out.RGB = (Src.RGB * Src.A + Dst.RGB * Dst.A * (1 - Src.A)) / Out.A
 ```
 
 在 `render_piece` 中：
-1. 先将纹理平铺到与 Mask 等大的画布上。
+1. 先将面料平铺到与 Mask 等大的画布上。
 2. 再通过 `canvas.putalpha(mask)` 将裁片的灰度掩码应用为 Alpha 通道。
-3. 最终输出只保留裁片形状内的纹理内容。
+3. 最终输出只保留裁片形状内的面料内容。
 
 ### 4.4 平铺渲染优化
 
@@ -252,7 +252,7 @@ for y in range(start_y, mask.height + tile.height, tile.height):
         canvas.alpha_composite(tile, (x, y))
 ```
 
-这里使用了**负起始偏移** (`-tile.width`) 确保即使 `offset_x` 为负值，纹理也能覆盖整个 Mask 区域。这种“过度绘制”策略在 GPU/Canvas 渲染中很常见，保证了边界无空白。
+这里使用了**负起始偏移** (`-tile.width`) 确保即使 `offset_x` 为负值，面料也能覆盖整个 Mask 区域。这种“过度绘制”策略在 GPU/Canvas 渲染中很常见，保证了边界无空白。
 
 ### 4.5 整套排版（Layout Rendering）
 
@@ -267,7 +267,7 @@ for y in range(start_y, mask.height + tile.height, tile.height):
 
 ---
 
-## 5. AI 纹理生成与 Provider 架构
+## 5. AI 面料生成与 Provider 架构
 
 ### 5.1 多 Provider 设计模式
 
@@ -336,7 +336,7 @@ Replicate 采用**异步 Prediction 模式**：
 /api/projects/{id}/templates/import  POST  导入模板
 /api/projects/{id}/pieces  GET    列出裁片
 /api/projects/{id}/pieces/{piece_id} PATCH 更新裁片
-/api/projects/{id}/textures/generate POST 生成纹理
+/api/projects/{id}/textures/generate POST 生成面料
 /api/projects/{id}/render/preview    POST 预览渲染
 /api/projects/{id}/exports   POST   导出 ZIP
 /api/jobs/{job_id}         GET    查询任务
@@ -348,7 +348,7 @@ Replicate 采用**异步 Prediction 模式**：
 
 - `ProjectCreate`：项目创建入参
 - `PieceTransform`：裁片变换参数（offset_x/y, scale, rotation, mirror_x/y）
-- `TextureGenerateRequest`：纹理生成请求
+- `TextureGenerateRequest`：面料生成请求
 - `ExportRequest`：导出配置
 
 Pydantic v2 通过 Rust 核心大幅提升了校验速度，适合高吞吐 API。
@@ -418,7 +418,7 @@ Konva 是一个基于 HTML5 Canvas 的 2D 图形库，提供了类似 DOM 的层
 |------|------|-------------|
 | **Stage** | 画布根容器 | 左右两个独立画布（单片校正 + 整套排版） |
 | **Layer** | 渲染层，独立离屏 Canvas | 所有图形元素挂载在 Layer 上 |
-| **Shape** | 图形对象（Image, Rect, Text） | 裁片 Mask、纹理图、边框、标签 |
+| **Shape** | 图形对象（Image, Rect, Text） | 裁片 Mask、面料图、边框、标签 |
 | **Transformer** | 变换控制器 | 本项目通过自定义 drag 实现类似效果 |
 
 #### 事件系统
@@ -427,13 +427,13 @@ Konva 在原生 Canvas 之上实现了一套**命中检测（Hit Detection）**�
 1. 每个 Shape 有一个独立的离屏命中 Canvas。
 2. 鼠标事件发生时，Konva 在命中 Canvas 上检测像素颜色，确定触发哪个 Shape 的监听器。
 
-项目中利用 `onClick`、`onTap`、`onDragEnd` 实现裁片选中和纹理拖拽。
+项目中利用 `onClick`、`onTap`、`onDragEnd` 实现裁片选中和面料拖拽。
 
 ### 7.4 双画布协同设计
 
 | 画布 | 功能 | 缩放策略 |
 |------|------|----------|
-| **单片校正** | 显示当前选中裁片的 Mask 轮廓 + 可拖拽纹理 | `pieceZoom` 手动控制（默认 1x） |
+| **单片校正** | 显示当前选中裁片的 Mask 轮廓 + 可拖拽面料 | `pieceZoom` 手动控制（默认 1x） |
 | **整套排版** | 按原始坐标显示所有裁片边框，支持点击选中 | `layoutZoom` 自动适配 + 手动微调 |
 
 #### 自适应缩放算法
@@ -477,7 +477,7 @@ SQLite 是零配置、单文件的嵌入式关系型数据库，非常适合：
 | `projects` | 项目元数据 | dpi, unit, canvas_width, canvas_height |
 | `assets` | 原始素材 | kind, path, sha256, width, height |
 | `pieces` | 拆分后的裁片 | mask_path, bbox, polygon, transform, source_x/y |
-| `textures` | 纹理记录 | source_path, seamless_path, provider, prompt |
+| `textures` | 面料记录 | source_path, seamless_path, provider, prompt |
 | `jobs` | 异步任务 | status, progress, error, input, output |
 
 ### 8.3 JSON 字段扩展模式
@@ -560,7 +560,7 @@ AI Provider 的 API Key 通过环境变量读取，不写入代码或数据库�
 
 > 本附录基于 DuckDuckGo（ddgs）免费搜索整理，共收录约 55 篇技术文章、论文与官方文档，
 
-> 覆盖图像分割、纹理合成、AI 生图、Web 架构、前端交互、数据存储与服装产业数字化。
+> 覆盖图像分割、面料合成、AI 生图、Web 架构、前端交互、数据存储与服装产业数字化。
 
 
 ## 10.1 计算机视觉与图像分割（15 篇）
@@ -611,7 +611,7 @@ AI Provider 的 API Key 通过环境变量读取，不写入代码或数据库�
    The Segment Anything Model (SAM) marks a significant advancement in computer vision, designed to improve how machines in
 
 
-## 10.2 无缝纹理与图形合成（20 篇）
+## 10.2 无缝面料与图形合成（20 篇）
 
 16. **[Free Seamless Texture Generator: Create Photoshop Patterns (1-Click)](https://the-orange-box.com/product/free-seamless-texture-generator/)**  
    February 10, 2026 - Stop struggling with Offset filters. Download the free Seamless Texture Generator for Photoshop. Cre

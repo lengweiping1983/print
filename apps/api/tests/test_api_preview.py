@@ -187,7 +187,7 @@ def test_global_fit_snaps_piece_regions_to_texture_repeat() -> None:
         ).json()
         texture_job = client.post(
             f"/api/projects/{project['id']}/textures/generate",
-            json={"source_asset_id": asset["id"], "source_type": "pattern", "prompt": "重复条纹满版纹理", "provider": "local", "model": "local-copy"},
+            json={"source_asset_id": asset["id"], "source_type": "pattern", "prompt": "重复条纹满版面料", "provider": "local", "model": "local-copy"},
         ).json()["job_id"]
         texture_done = wait_job(client, texture_job)
         texture_id = texture_done["output"]["texture"]["id"]
@@ -206,7 +206,7 @@ def test_global_fit_snaps_piece_regions_to_texture_repeat() -> None:
         assert abs(repeat["period_x"] - 24) <= 1
 
         pieces = client.get(f"/api/projects/{project['id']}/pieces").json()
-        snapped_pieces = [piece for piece in pieces if "已按纹理周期吸附" in piece["transform"]["fit_note"]]
+        snapped_pieces = [piece for piece in pieces if "已按面料周期吸附" in piece["transform"]["fit_note"]]
         assert snapped_pieces
         for piece in snapped_pieces:
             design_x = piece["transform"]["design_x"]
@@ -309,7 +309,7 @@ def test_texture_generation_auto_creates_seamless_for_water_pattern() -> None:
         ).json()
         texture_job = client.post(
             f"/api/projects/{project['id']}/textures/generate",
-            json={"source_asset_id": asset["id"], "source_type": "pattern", "prompt": "水纹满版纹理", "provider": "local", "model": "local-copy"},
+            json={"source_asset_id": asset["id"], "source_type": "pattern", "prompt": "水纹满版面料", "provider": "local", "model": "local-copy"},
         ).json()["job_id"]
         texture = wait_job(client, texture_job)["output"]["texture"]
 
@@ -370,7 +370,7 @@ def test_global_fit_texture_source_selection_and_fallback() -> None:
         ).json()
         water_job = client.post(
             f"/api/projects/{project['id']}/textures/generate",
-            json={"source_asset_id": water_asset["id"], "source_type": "pattern", "prompt": "水纹满版纹理", "provider": "local", "model": "local-copy"},
+            json={"source_asset_id": water_asset["id"], "source_type": "pattern", "prompt": "水纹满版面料", "provider": "local", "model": "local-copy"},
         ).json()["job_id"]
         water_texture = wait_job(client, water_job)["output"]["texture"]
         fit_job = client.post(

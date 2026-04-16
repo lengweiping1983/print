@@ -132,7 +132,7 @@ def auto_map_pieces(
         note = _fit_note(role, confidence, garment_type)
         rotation, orientation_note = _orientation_rotation(box, role)
         if snapped:
-            note = f"{note} 已按纹理周期吸附取样坐标。"
+            note = f"{note} 已按面料周期吸附取样坐标。"
         if placement.clipped:
             note = f"{note} 裁片尺寸接近或超出自动车道，已夹在画布范围内，建议人工确认。"
         if orientation_note:
@@ -535,12 +535,12 @@ def _apply_seam_alignment(mapped: list[dict[str, Any]], snap: tuple[float, float
 
     原理
     ----
-    设计画布上平铺的纹理以 (period_x, period_y) 为最小重复单元。
+    设计画布上平铺的面料以 (period_x, period_y) 为最小重复单元。
     两个裁片 A、B 在缝合边处的花型连续，等价于：
         A 的缝合代表坐标 ≡ B 的缝合代表坐标  (mod period)
 
     对于每对 seam_link (A.edge → B.to_edge)：
-    1. 计算 A 和 B 各自缝合边的"纹理相位代表值"：
+    1. 计算 A 和 B 各自缝合边的"面料相位代表值"：
        - 水平边（shoulder/neckline/hem）→ design_x
        - 垂直边（side/armhole/sleeve_cap）→ design_y
     2. 计算相位差 delta = phase_A - phase_B
@@ -606,7 +606,7 @@ def _apply_seam_alignment(mapped: list[dict[str, Any]], snap: tuple[float, float
 
 
 def _seam_phase(entry: dict[str, Any], axis: str, position: str | None = None) -> float:
-    """返回裁片指定边在纹理轴上的代表坐标；缺少边位置时回退到起始坐标。"""
+    """返回裁片指定边在面料轴上的代表坐标；缺少边位置时回退到起始坐标。"""
     region = entry["design_region"]
     x = float(region["x"])
     y = float(region["y"])
@@ -659,6 +659,6 @@ def _append_seam_note(entry: dict[str, Any], partner_role: str, edge: str, axis:
         "shoulder": "肩缝", "neckline": "领口缝", "hem": "下摆缝",
         "side": "侧缝", "armhole": "袖窿缝", "sleeve_cap": "袖山缝",
     }.get(edge, edge)
-    note_fragment = f"已按{axis_label}纹理周期对齐{partner_label}{edge_label}（调整 {amount:+.1f}px）。"
+    note_fragment = f"已按{axis_label}面料周期对齐{partner_label}{edge_label}（调整 {amount:+.1f}px）。"
     current = entry.get("fit_note", "")
     entry["fit_note"] = f"{current} {note_fragment}".strip()

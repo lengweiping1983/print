@@ -11,14 +11,14 @@
 ```text
 先生成一张“完整衣服的虚拟设计画布”
     ↓
-把纹理、主视觉、logo、文字先放到这张设计画布
+把面料、主视觉、logo、文字先放到这张设计画布
     ↓
 每个裁片只记录自己在设计画布中的取样区域
     ↓
 导出时从同一张设计画布里切出各裁片 PNG
 ```
 
-这样所有裁片共享同一套纹理坐标，整件衣服看起来像从同一张大图中裁出来。
+这样所有裁片共享同一套面料坐标，整件衣服看起来像从同一张大图中裁出来。
 
 ---
 
@@ -37,11 +37,11 @@
 | `width` / `height` | 全局设计画布尺寸 |
 | `unit` | 单位，当前为 `px` |
 | `base_size` | 基码预留字段，后续用于多尺码联动 |
-| `global_texture_angle` | 全局纹理方向 |
-| `texture_scale` | 全局纹理缩放 |
-| `texture_offset_x` / `texture_offset_y` | 全局纹理偏移 |
-| `tile` | 是否平铺纹理 |
-| `mirror` | 是否镜像扩展纹理 |
+| `global_texture_angle` | 全局面料方向 |
+| `texture_scale` | 全局面料缩放 |
+| `texture_offset_x` / `texture_offset_y` | 全局面料偏移 |
+| `tile` | 是否平铺面料 |
+| `mirror` | 是否镜像扩展面料 |
 | `symmetry` | 左右规则：`continuous` 或 `mirror` |
 | `anchor` | 主视觉锚点，如前胸中心、后背中心 |
 | `design_anchors` | 项目级主视觉锚点集合 |
@@ -97,7 +97,7 @@ apps/api/app/
 ├── main.py          # API 路由、job 编排、数据库写回
 ├── schemas.py       # Pydantic 请求/响应模型
 ├── layout_ops.py    # 裁片角色识别、设计画布布局、映射字段生成
-├── design_ops.py    # 全局设计画布纹理生成、预览生成
+├── design_ops.py    # 全局设计画布面料生成、预览生成
 └── image_ops.py     # 本地/全局两种渲染模式
 ```
 
@@ -110,7 +110,7 @@ apps/api/app/
   - 生成 `safe_zones`、`avoid_zones`、`seam_links` 的第一版结构。
 
 - `design_ops.py`
-  - 根据原始纹理生成全局设计画布 PNG。
+  - 根据原始面料生成全局设计画布 PNG。
   - 支持缩放、旋转、平铺、镜像、整体偏移。
   - 生成全局适配预览。
 
@@ -132,7 +132,7 @@ apps/web/
 
 前端提供三个视角：
 
-- 「单片校正」：看当前裁片在 mask 中的纹理效果，支持微调。
+- 「单片校正」：看当前裁片在 mask 中的面料效果，支持微调。
 - 「整套排版」：按模板原始坐标回排所有裁片。
 - 「全局设计画布」：查看整张虚拟衣服大画布，以及每个裁片从哪里取样。
 
@@ -169,7 +169,7 @@ POST /api/projects/{project_id}/layout/auto-map
 
 - 只识别裁片角色。
 - 只建立设计画布和裁片映射。
-- 不重新生成纹理设计画布。
+- 不重新生成面料设计画布。
 
 请求示例：
 
@@ -188,9 +188,9 @@ POST /api/projects/{project_id}/layout/auto-map
 - 更新后的 `pieces`
 - `warnings`
 
-适合在没有纹理时先做裁片角色确认。
+适合在没有面料时先做裁片角色确认。
 
-### 4.2 全局纹理适配
+### 4.2 全局面料适配
 
 接口：
 
@@ -202,7 +202,7 @@ POST /api/projects/{project_id}/textures/{texture_id}/fit-global
 
 - 生成全局设计画布 PNG。
 - 自动识别裁片并写入全局取样区域。
-- 更新纹理记录，使前端使用全局设计画布作为当前纹理。
+- 更新面料记录，使前端使用全局设计画布作为当前面料。
 - 生成整套全局适配预览。
 
 请求示例：
@@ -246,12 +246,12 @@ POST /api/projects/{project_id}/textures/{texture_id}/fit-global
 5. 上传图案、水纹、迷彩、花纹或衣服参考图。
 6. 在「全局适配」面板设置：
    - 衣服类型。
-   - 全局纹理方向。
-   - 纹理缩放。
+   - 全局面料方向。
+   - 面料缩放。
    - 偏移 X / Y。
    - 左右规则。
    - 主视觉中心。
-7. 点击「自动适配纹理」。
+7. 点击「自动适配面料」。
 8. 在「全局设计画布」视图检查裁片取样框。
 9. 在「单片校正」中微调当前裁片。
 10. 导出打样包。
@@ -284,7 +284,7 @@ render_piece_from_design_canvas
 
 ```text
 mode = "local"
-  纹理在单裁片 mask 内独立平铺、缩放、旋转、平移。
+  面料在单裁片 mask 内独立平铺、缩放、旋转、平移。
 
 mode = "global_canvas"
   从全局设计画布的 design_region 取样，再用裁片 mask 裁切。
@@ -300,7 +300,7 @@ mode = "global_canvas"
 
 `build_design_texture_canvas` 使用 Pillow 生成画布：
 
-1. 读取原始纹理图。
+1. 读取原始面料图。
 2. 按 `texture_scale` 缩放。
 3. 如果 `mirror=true`，先做 2x2 镜像扩展。
 4. 按 `global_texture_angle` 旋转。
@@ -341,7 +341,7 @@ mode = "global_canvas"
 
 前端 `KonvaWorkspace` 也使用同样概念：
 
-- `global_canvas` 模式下，纹理图片不再被局部平移/旋转到 mask 外。
+- `global_canvas` 模式下，面料图片不再被局部平移/旋转到 mask 外。
 - 平移操作改为移动 crop 取样坐标。
 - 旋转不再直接旋转裁片内图片本体，避免出现白块。
 - 线框大小由「显示线框」后的线宽选择器统一控制，默认 5px。
@@ -411,12 +411,12 @@ mode = "global_canvas"
 优化方向：
 
 - 增加拼缝编辑器，允许选择裁片边并建立连接关系。
-- 后端读取 seam 两侧边缘像素，计算色差、纹理相位差和方向差。
+- 后端读取 seam 两侧边缘像素，计算色差、面料相位差和方向差。
 - 导出 manifest 中输出 seam 检查结果，标注高风险拼缝。
 
 ### 7.4 主视觉、logo、文字还没有图层系统
 
-当前全局设计画布只把上传纹理整体平铺或居中放置，并绘制锚点提示。logo、鱼、文字、号码、队名等还没有作为独立图层保存。
+当前全局设计画布只把上传面料整体平铺或居中放置，并绘制锚点提示。logo、鱼、文字、号码、队名等还没有作为独立图层保存。
 
 缺点：
 
@@ -428,7 +428,7 @@ mode = "global_canvas"
 
 - 在 `export_config.design_canvas.layers` 中保存图层数组。
 - 图层类型包括 `texture`、`image`、`text`、`marker`。
-- `build_design_texture_canvas` 改为按图层顺序合成，而不是只处理一张纹理。
+- `build_design_texture_canvas` 改为按图层顺序合成，而不是只处理一张面料。
 
 ### 7.5 多尺码只预留字段，尚未形成生产流程
 
@@ -448,7 +448,7 @@ mode = "global_canvas"
 
 ### 7.6 前端可调参数还偏少
 
-当前前端可调全局纹理方向、缩放、偏移、左右规则、主视觉中心，也能微调单裁片全局 X/Y。
+当前前端可调全局面料方向、缩放、偏移、左右规则、主视觉中心，也能微调单裁片全局 X/Y。
 
 缺点：
 
@@ -539,7 +539,7 @@ mode = "global_canvas"
 
 用户目标：
 
-- 整件衣服共享同一张底纹，前片、后片、袖片纹理密度一致。
+- 整件衣服共享同一张底纹，前片、后片、袖片面料密度一致。
 
 当前可支持：
 
@@ -550,15 +550,15 @@ mode = "global_canvas"
 实现步骤：
 
 1. 前端选择 `symmetry = continuous`。
-2. 上传纹理后调用 `POST /textures/{texture_id}/fit-global`。
-3. 后端 `build_design_canvas_config` 写入全局纹理方向、缩放、偏移。
-4. 后端 `build_design_texture_canvas` 平铺纹理。
+2. 上传面料后调用 `POST /textures/{texture_id}/fit-global`。
+3. 后端 `build_design_canvas_config` 写入全局面料方向、缩放、偏移。
+4. 后端 `build_design_texture_canvas` 平铺面料。
 5. `auto_map_pieces` 给每个裁片分配 `design_x/design_y/design_width/design_height`。
 6. 导出时 `render_piece_from_design_canvas` 统一取样。
 
 增强点：
 
-- 增加“纹理密度锁定”，使缩放只影响底纹，不影响 logo 和文字。
+- 增加“面料密度锁定”，使缩放只影响底纹，不影响 logo 和文字。
 - 增加“随机相位偏移”，用于迷彩、石纹等不要求严格拼缝的花型。
 
 ### 9.2 左右镜像：对称球衣、队服、制服
@@ -639,7 +639,7 @@ mode = "global_canvas"
 
 当前能力：
 
-- 只能把文字作为图片纹理的一部分上传。
+- 只能把文字作为图片面料的一部分上传。
 
 需要补强：
 
@@ -736,7 +736,7 @@ mode = "global_canvas"
 
 1. 前端 seam editor 中让用户标记袖山边和袖窿边。
 2. 数据中记录边缘 polyline，而不是只记录 `edge = sleeve_cap`。
-3. 后端沿两条 polyline 等距采样纹理颜色。
+3. 后端沿两条 polyline 等距采样面料颜色。
 4. 计算平均色差、最大色差、方向差，输出风险评分。
 5. 第一阶段只提示人工微调，第二阶段再实现自动微调 `design_x/design_y`。
 
@@ -753,7 +753,7 @@ mode = "global_canvas"
 
 当前能力：
 
-- 可通过全局纹理方向和缩放控制条纹密度。
+- 可通过全局面料方向和缩放控制条纹密度。
 
 需要补强：
 
@@ -763,7 +763,7 @@ mode = "global_canvas"
 
 实现步骤：
 
-1. 后端对纹理做简单投影分析，估算横向/纵向周期。
+1. 后端对面料做简单投影分析，估算横向/纵向周期。
 2. 在 `design_canvas` 记录 `pattern_period_x/pattern_period_y`。
 3. 裁片 transform 增加 `grainline_angle` 和 `stripe_phase_lock`。
 4. 对需要对条的 seam link，检查两侧采样点是否落在同一周期相位。
@@ -809,7 +809,7 @@ mode = "global_canvas"
 
 当前能力：
 
-- 可以作为普通纹理平铺。
+- 可以作为普通面料平铺。
 
 需要补强：
 
@@ -1032,7 +1032,7 @@ mode = "global_canvas"
 
 第一版不是完整的 3D 服装展开系统，当前限制包括：
 
-- 不能从单张衣服照片精确反推出真实 3D 纹理。
+- 不能从单张衣服照片精确反推出真实 3D 面料。
 - 裁片角色识别是启发式，不保证所有版型都正确。
 - `seam_links`、`safe_zones`、`avoid_zones` 已有数据结构，但还没有完整 UI 编辑。
 - 拼缝连续性当前主要依赖全局取样坐标，没有做 seam-aware warp。
@@ -1080,7 +1080,7 @@ pieces.transform.markers
 可逐步引入：
 
 - 主体分割：SAM / MediaPipe / OpenCV GrabCut。
-- 纹理合成：PatchMatch / Image Quilting。
+- 面料合成：PatchMatch / Image Quilting。
 - 无缝扩图：AI outpainting。
 - 拼缝优化：seam-aware local warp。
 - 结构识别：基于裁片 polygon 的版型分类。

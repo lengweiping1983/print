@@ -46,8 +46,8 @@ def build_design_texture_canvas(
             else:
                 canvas.alpha_composite(tile, ((width - tile.width) // 2 + offset_x, (height - tile.height) // 2 + offset_y))
     except Exception as exc:
-        logger.exception("加载纹理图片失败: %s", texture_path)
-        raise RuntimeError(f"无法加载纹理图片 {texture_path}: {exc}") from exc
+        logger.exception("加载面料图片失败: %s", texture_path)
+        raise RuntimeError(f"无法加载面料图片 {texture_path}: {exc}") from exc
 
     layer_warnings = _draw_design_layers(canvas, design_canvas, asset_paths or {})
     if layer_warnings:

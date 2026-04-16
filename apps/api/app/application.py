@@ -1300,7 +1300,7 @@ def _generate_texture_job(job_id: str, payload: dict) -> dict:
             provider = get_provider("neodomain")
         else:
             provider = get_provider(payload.get("provider", "local"))
-        provider.generate_texture(payload.get("prompt") or "服装布料纹理", dst, width, height, payload.get("seed", ""))
+        provider.generate_texture(payload.get("prompt") or "服装布料面料", dst, width, height, payload.get("seed", ""))
         source_path = rel_path(dst)
     analysis = analyze_texture_fit_source(
         storage_path(source_path),
@@ -1746,7 +1746,7 @@ def create_default_texture(project_id: str) -> dict:
     dst = textures_dir / f"{texture_id}_default.png"
     provider = get_provider("local")
     width, height = provider.generate_texture(
-        "默认打样纹理。请上传图案或生成 AI 纹理后替换。",
+        "默认打样面料。请上传图案或生成 AI 面料后替换。",
         dst,
         2048,
         2048,
@@ -1763,7 +1763,7 @@ def create_default_texture(project_id: str) -> dict:
                 texture_id,
                 project_id,
                 rel_path(dst),
-                "默认打样纹理。请上传图案或生成 AI 纹理后替换。",
+                "默认打样面料。请上传图案或生成 AI 面料后替换。",
                 width,
                 height,
                 created,
@@ -1818,7 +1818,7 @@ def apply_content_alignment(design_canvas: dict, content: dict, texture_source: 
         return
     angle = float(design_canvas.get("global_texture_angle", 0) or 0) % 360
     if min(angle, 360 - angle) > 0.01:
-        alignment["note"] = "纹理存在旋转，主体重心定位未启用。"
+        alignment["note"] = "面料存在旋转，主体重心定位未启用。"
         design_canvas["content_alignment"] = alignment
         return
 
@@ -1850,7 +1850,7 @@ def resolve_texture_source(texture: dict, requested_source: str | None) -> tuple
         seamless_path = texture.get("seamless_path") or ""
         if seamless_path:
             return storage_path(seamless_path), "seamless", warnings
-        warnings.append("请求使用无缝图，但当前纹理还没有无缝图，已回退为原图。")
+        warnings.append("请求使用无缝图，但当前面料还没有无缝图，已回退为原图。")
     return storage_path(texture["source_path"]), "source", warnings
 
 

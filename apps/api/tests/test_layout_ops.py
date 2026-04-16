@@ -236,7 +236,7 @@ def test_seam_alignment_keeps_legacy_links_working() -> None:
     _apply_seam_alignment(mapped, (24, 24))
 
     assert mapped[0]["design_region"]["x"] == 97
-    assert "已按水平纹理周期对齐" in mapped[0]["fit_note"]
+    assert "已按水平面料周期对齐" in mapped[0]["fit_note"]
 
 
 def _body_piece(tmp_path: Path, piece_id: str, width: int, height: int, neck_side: str, area: int) -> dict:
