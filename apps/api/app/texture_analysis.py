@@ -131,6 +131,7 @@ def detect_content_centroid(image_path: Path, *, image_stats: dict[str, float] |
     result = {
         "has_content": False,
         "centroid": {"x": 0.0, "y": 0.0},
+        "centroid_unit": "px",
         "content_bbox": {"x": 0, "y": 0, "width": 0, "height": 0},
         "opaque_ratio": 0.0,
         "confidence": 0.0,
@@ -169,10 +170,13 @@ def detect_repeat_period(image_path: Path, *, image_stats: dict[str, float] | No
         "method": "autocorrelation_v1",
     }
     stats = image_stats or _image_stats(image_path)
-    if stats["transparent_ratio"] > 0.08 or stats["edge_alpha_ratio"] < 0.92:
-        return result
 
     with Image.open(image_path).convert("RGBA") as img:
+        if stats["transparent_ratio"] > 0.08 or stats["edge_alpha_ratio"] < 0.92:
+            cropped = _crop_repeatable_alpha_region(img)
+            if cropped is None:
+                return result
+            img = cropped
         width, height = img.size
         scale = min(1.0, 512 / max(width, height))
         if scale < 1:
@@ -212,19 +216,7 @@ def _image_stats(image_path: Path) -> dict[str, float]:
             alpha_stat = ImageStat.Stat(alpha)
             transparent_ratio = 1 - (alpha_stat.mean[0] / 255)
             width, height = img.size
-            edge = Image.new("L", img.size, 0)
-            edge_pixels = edge.load()
-            if edge_pixels is not None:
-                for x in range(width):
-                    edge_pixels[x, 0] = 255
-                    edge_pixels[x, height - 1] = 255
-                for y in range(height):
-                    edge_pixels[0, y] = 255
-                    edge_pixels[width - 1, y] = 255
-            edge_alpha = ImageChops.multiply(alpha, edge)
-            edge_alpha_stat = ImageStat.Stat(edge_alpha)
-            edge_pixels_count = max(1, width * 2 + height * 2 - 4)
-            edge_alpha_ratio = min(1.0, edge_alpha_stat.sum[0] / (edge_pixels_count * 255))
+            edge_alpha_ratio = _edge_alpha_ratio(alpha)
 
             rgb = img.convert("RGB")
             left = rgb.crop((0, 0, 1, height)).resize((1, 64))
@@ -242,6 +234,58 @@ def _image_stats(image_path: Path) -> dict[str, float]:
     except Exception as exc:
         logger.exception("分析图片统计信息失败: %s", image_path)
         raise RuntimeError(f"无法分析图片统计信息 {image_path}: {exc}") from exc
+
+
+def _crop_repeatable_alpha_region(img: Image.Image) -> Image.Image | None:
+    alpha = img.getchannel("A")
+    bbox = alpha.getbbox()
+    if bbox is None:
+        return None
+    width, height = img.size
+    bbox_w = bbox[2] - bbox[0]
+    bbox_h = bbox[3] - bbox[1]
+    if bbox_w < 12 or bbox_h < 12:
+        return None
+
+    coverage = (bbox_w * bbox_h) / max(1, width * height)
+    if coverage < 0.35:
+        return None
+
+    cropped = img.crop(bbox)
+    cropped_alpha = cropped.getchannel("A")
+    cropped_alpha_stat = ImageStat.Stat(cropped_alpha)
+    transparent_ratio = 1 - (cropped_alpha_stat.mean[0] / 255)
+    if transparent_ratio > 0.08 or _edge_alpha_ratio(cropped_alpha) < 0.92:
+        return None
+    return cropped
+
+
+def _edge_points(width: int, height: int) -> list[tuple[int, int]]:
+    points: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for x in range(width):
+        for y in (0, height - 1):
+            point = (x, y)
+            if point not in seen:
+                points.append(point)
+                seen.add(point)
+    for y in range(height):
+        for x in (0, width - 1):
+            point = (x, y)
+            if point not in seen:
+                points.append(point)
+                seen.add(point)
+    return points
+
+
+def _edge_alpha_ratio(alpha: Image.Image) -> float:
+    pixels = alpha.load()
+    if pixels is None:
+        return 0.0
+    points = _edge_points(*alpha.size)
+    if not points:
+        return 0.0
+    return min(1.0, sum(float(pixels[x, y]) for x, y in points) / (len(points) * 255))
 
 
 def _normalized_diff(a: Image.Image, b: Image.Image) -> float:
@@ -317,6 +361,7 @@ def _content_result_from_mask(
     result = {
         "has_content": False,
         "centroid": {"x": 0.0, "y": 0.0},
+        "centroid_unit": "px",
         "content_bbox": {"x": 0, "y": 0, "width": 0, "height": 0},
         "opaque_ratio": round(opaque_ratio, 4),
         "confidence": 0.0,
@@ -366,13 +411,7 @@ def _edge_average_rgb(image: Image.Image) -> tuple[float, float, float]:
     pixels = image.load()
     if pixels is None:
         return (0.0, 0.0, 0.0)
-    samples: list[tuple[int, int, int]] = []
-    for x in range(width):
-        samples.append(pixels[x, 0])
-        samples.append(pixels[x, height - 1])
-    for y in range(1, max(1, height - 1)):
-        samples.append(pixels[0, y])
-        samples.append(pixels[width - 1, y])
+    samples = [pixels[x, y] for x, y in _edge_points(width, height)]
     count = max(1, len(samples))
     return (
         sum(sample[0] for sample in samples) / count,

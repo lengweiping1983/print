@@ -1206,12 +1206,18 @@ function ToolbarSnapButton({
 
   const handleSnap = () => {
     if (!hasRepeat || !repeat) return;
-    const curX = piece.transform.design_x ?? 0;
-    const curY = piece.transform.design_y ?? 0;
-    const snappedX = periodX > 0 ? offsetX + Math.round((curX - offsetX) / periodX) * periodX : curX;
-    const snappedY = periodY > 0 ? offsetY + Math.round((curY - offsetY) / periodY) * periodY : curY;
-    if (Math.abs(snappedX - curX) > 0.5 || Math.abs(snappedY - curY) > 0.5) {
-      onPatchTransform({ design_x: Math.round(snappedX), design_y: Math.round(snappedY) });
+    const snapped = snapPieceSamplingOffset({
+      designX: piece.transform.design_x ?? 0,
+      designY: piece.transform.design_y ?? 0,
+      offsetX: piece.transform.offset_x ?? 0,
+      offsetY: piece.transform.offset_y ?? 0,
+      originX: offsetX,
+      originY: offsetY,
+      periodX,
+      periodY,
+    });
+    if (snapped.changed) {
+      onPatchTransform({ offset_x: snapped.offsetX, offset_y: snapped.offsetY });
     }
   };
 
@@ -1245,6 +1251,38 @@ function ToolbarSnapButton({
       </div>
     </div>
   );
+}
+
+export function snapPieceSamplingOffset({
+  designX,
+  designY,
+  offsetX,
+  offsetY,
+  originX,
+  originY,
+  periodX,
+  periodY,
+}: {
+  designX: number;
+  designY: number;
+  offsetX: number;
+  offsetY: number;
+  originX: number;
+  originY: number;
+  periodX: number;
+  periodY: number;
+}): { offsetX: number; offsetY: number; changed: boolean } {
+  const sampleX = designX + offsetX;
+  const sampleY = designY + offsetY;
+  const snappedX = periodX > 0 ? originX + Math.round((sampleX - originX) / periodX) * periodX : sampleX;
+  const snappedY = periodY > 0 ? originY + Math.round((sampleY - originY) / periodY) * periodY : sampleY;
+  const nextOffsetX = Math.round(offsetX + snappedX - sampleX);
+  const nextOffsetY = Math.round(offsetY + snappedY - sampleY);
+  return {
+    offsetX: nextOffsetX,
+    offsetY: nextOffsetY,
+    changed: Math.abs(nextOffsetX - offsetX) > 0.5 || Math.abs(nextOffsetY - offsetY) > 0.5,
+  };
 }
 
 function ToolbarCenterButton({

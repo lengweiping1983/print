@@ -14,6 +14,7 @@ ROLE_LABELS = {
     "front_left": "左前片",
     "front_right": "右前片",
     "back": "后片",
+    "main": "主片",
     "sleeve_left": "左袖",
     "sleeve_right": "右袖",
     "collar": "领片",
@@ -102,7 +103,7 @@ def auto_map_pieces(
     roles = _assign_roles(boxes)
     lanes = _role_lanes(design_canvas)
     snap = _texture_snap_settings(design_canvas)
-    lane_offsets: dict[str, float] = {}
+    lane_offsets: dict[str, int] = {}
     mapped: list[dict[str, Any]] = []
     for piece in pieces:
         box = _box(piece)
@@ -199,7 +200,9 @@ def _assign_roles(boxes: list[PieceBox]) -> dict[str, str]:
     for index, box in enumerate(strips):
         roles[box.id] = "collar" if index == 0 else "placket" if index == 1 else "strip"
     body_candidates = [box for box in ordered if box.id not in roles]
-    if body_candidates:
+    if len(body_candidates) == 1:
+        roles[body_candidates[0].id] = "main"
+    elif body_candidates:
         roles[body_candidates[0].id] = "back"
     pairs = _find_similar_pairs([box for box in body_candidates[1:] if box.id not in roles])
     if pairs:
@@ -248,6 +251,7 @@ def _role_lanes(canvas: dict[str, Any]) -> dict[str, tuple[float, float, float, 
         "front_left": (margin, margin, w * 0.24, h * 0.48),
         "front_right": (w * 0.26, margin, w * 0.24, h * 0.48),
         "back": (w * 0.56, margin, w * 0.34, h * 0.52),
+        "main": (w * 0.3, h * 0.22, w * 0.4, h * 0.52),
         "sleeve_left": (margin, h * 0.6, w * 0.28, h * 0.26),
         "sleeve_right": (w * 0.34, h * 0.6, w * 0.28, h * 0.26),
         "collar": (w * 0.66, h * 0.62, w * 0.25, h * 0.12),
@@ -257,7 +261,7 @@ def _role_lanes(canvas: dict[str, Any]) -> dict[str, tuple[float, float, float, 
     }
 
 
-def _place_in_lane(box: PieceBox, lane: tuple[float, float, float, float], index: float) -> tuple[float, float]:
+def _place_in_lane(box: PieceBox, lane: tuple[float, float, float, float], index: int) -> tuple[float, float]:
     x, y, lane_w, lane_h = lane
     step = max(24, min(box.width, lane_w / 4))
     row_step = max(24, min(box.height, lane_h / 3))
@@ -319,6 +323,8 @@ def _mirror_role(role: str, canvas: dict[str, Any]) -> bool:
 def _role_confidence(role: str, box: PieceBox) -> float:
     if role == "unknown":
         return 0.35
+    if role == "main":
+        return 0.68
     if role in {"collar", "placket", "strip"}:
         return 0.72 if box.aspect >= 3 or box.aspect <= 0.28 else 0.5
     return 0.78

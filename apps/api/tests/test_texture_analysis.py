@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from app.texture_analysis import detect_content_centroid, detect_repeat_period
+from app.texture_analysis import _edge_average_rgb, detect_content_centroid, detect_repeat_period
 
 
 def test_detect_repeat_period_finds_vertical_stripes(tmp_path: Path) -> None:
@@ -57,6 +57,22 @@ def test_detect_repeat_period_ignores_transparent_logo(tmp_path: Path) -> None:
     assert repeat["has_repeat"] is False
 
 
+def test_detect_repeat_period_crops_transparent_border_for_stripes(tmp_path: Path) -> None:
+    path = tmp_path / "transparent_stripes.png"
+    image = Image.new("RGBA", (128, 80), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((16, 8, 111, 71), fill=(255, 255, 255, 255))
+    for x in range(16, 112, 16):
+        draw.rectangle((x, 8, x + 7, 71), fill=(20, 20, 20, 255))
+    image.save(path)
+
+    repeat = detect_repeat_period(path)
+
+    assert repeat["has_repeat"] is True
+    assert abs(repeat["period_x"] - 16) <= 1
+    assert repeat["confidence_x"] >= 0.55
+
+
 def test_detect_content_centroid_finds_transparent_logo(tmp_path: Path) -> None:
     path = tmp_path / "logo.png"
     image = Image.new("RGBA", (100, 80), (255, 255, 255, 0))
@@ -67,6 +83,7 @@ def test_detect_content_centroid_finds_transparent_logo(tmp_path: Path) -> None:
 
     assert content["has_content"] is True
     assert content["method"] == "alpha_centroid_v1"
+    assert content["centroid_unit"] == "px"
     assert abs(content["centroid"]["x"] - 40) <= 1
     assert abs(content["centroid"]["y"] - 38) <= 1
     assert content["content_bbox"] == {"x": 20, "y": 18, "width": 41, "height": 41}
@@ -104,3 +121,12 @@ def test_detect_content_centroid_finds_opaque_foreground(tmp_path: Path) -> None
     assert content["method"] == "foreground_centroid_v1"
     assert abs(content["centroid"]["x"] - 50) <= 2
     assert abs(content["centroid"]["y"] - 40) <= 2
+
+
+def test_edge_average_rgb_samples_unique_single_row_edges() -> None:
+    image = Image.new("RGB", (3, 1), (0, 0, 0))
+    image.putpixel((0, 0), (30, 0, 0))
+    image.putpixel((1, 0), (60, 0, 0))
+    image.putpixel((2, 0), (90, 0, 0))
+
+    assert _edge_average_rgb(image) == (60, 0, 0)

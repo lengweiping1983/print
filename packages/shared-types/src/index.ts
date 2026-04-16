@@ -108,6 +108,7 @@ export type TextureRepeat = {
 export type ContentCentroid = {
   has_content: boolean;
   centroid: { x: number; y: number };
+  centroid_unit: "px";
   content_bbox: DesignRect;
   opaque_ratio: number;
   confidence: number;

@@ -54,6 +54,18 @@ def test_auto_map_marks_uncertain_rectangular_orientation(tmp_path: Path) -> Non
     assert "裁片上下方向置信度偏低" in by_role["back"]["fit_note"]
 
 
+def test_auto_map_marks_single_body_piece_as_main(tmp_path: Path) -> None:
+    pieces = [_rect_piece(tmp_path, "only", 120, 160, 20000)]
+    canvas = build_design_canvas_config(pieces)
+
+    mapped = auto_map_pieces(pieces, canvas, "unknown")
+
+    assert mapped[0]["piece_role"] == "main"
+    assert mapped[0]["role_label"] == "主片"
+    assert mapped[0]["seam_links"] == []
+    assert "后片" not in mapped[0]["fit_note"]
+
+
 def _body_piece(tmp_path: Path, piece_id: str, width: int, height: int, neck_side: str, area: int) -> dict:
     mask = Image.new("L", (width, height), 0)
     draw = ImageDraw.Draw(mask)
