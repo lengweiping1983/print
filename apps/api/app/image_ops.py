@@ -473,8 +473,24 @@ def paint_tiled(canvas: Image.Image, tile: Image.Image, start_x: int, start_y: i
     paint_step_h = step_h * rows
     for y in range(start_y, canvas.height + paint_step_h, paint_step_h):
         for x in range(start_x, canvas.width + paint_step_w, paint_step_w):
-            canvas.alpha_composite(paint_tile, (x, y))
+            alpha_composite_clipped(canvas, paint_tile, x, y)
     paint_tile.close()
+
+
+def alpha_composite_clipped(canvas: Image.Image, overlay: Image.Image, x: int, y: int) -> None:
+    left = max(0, x)
+    top = max(0, y)
+    right = min(canvas.width, x + overlay.width)
+    bottom = min(canvas.height, y + overlay.height)
+    if left >= right or top >= bottom:
+        return
+    crop_box = (left - x, top - y, right - x, bottom - y)
+    if crop_box == (0, 0, overlay.width, overlay.height):
+        canvas.alpha_composite(overlay, (x, y))
+        return
+    clipped = overlay.crop(crop_box)
+    canvas.alpha_composite(clipped, (left, top))
+    clipped.close()
 
 
 def repeated_tile_counts(canvas_size: tuple[int, int], tile_size: tuple[int, int], max_repeat: int = 4) -> tuple[int, int]:

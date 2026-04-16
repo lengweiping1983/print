@@ -6,8 +6,8 @@ import dynamic from "next/dynamic";
 import type { SetStateAction } from "react";
 import { useEffect, useMemo, useReducer, useRef } from "react";
 import { api, waitForJob } from "@/lib/api";
-import { PIECE_ROLE_LABELS, JOB_TYPE_LABELS, JOB_STATUS_LABELS } from "@/lib/labels";
-import { FileField, LayoutPreviewLoading, LayerEditor, Panel, Range, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
+import { JOB_TYPE_LABELS, JOB_STATUS_LABELS } from "@/lib/labels";
+import { LayoutPreviewLoading, LayerEditor, Panel, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
 
 const SinglePieceCalibration = dynamic(() => import("./KonvaWorkspace").then((mod) => mod.SinglePieceCalibration), {
   ssr: false,
@@ -20,6 +20,7 @@ const LayoutPreview = dynamic(() => import("./KonvaWorkspace").then((mod) => mod
 });
 
 const LAST_PROJECT_KEY = "print-studio:last-project-id";
+type TextureSourceType = "pattern" | "garment_photo" | "ai" | "library";
 
 const emptyTransform: PieceTransform = {
   offset_x: 0,
@@ -38,10 +39,10 @@ type StudioState = {
   pieces: Piece[];
   textures: Texture[];
   selectedPieceId: string;
-  sourceType: "pattern" | "garment_photo" | "ai" | "library";
   prompt: string;
   job: Job | null;
   notice: string;
+  showAiTextureDialog: boolean;
 
   textureFileName: string;
   textureViewMode: "source" | "seamless";
@@ -83,10 +84,10 @@ const initialStudioState: StudioState = {
   pieces: [],
   textures: [],
   selectedPieceId: "",
-  sourceType: "pattern",
   prompt: "深蓝底色，花卉与飞鹤纹样，适合男士衬衫裁片打样",
   job: null,
   notice: "正在准备工作台...",
+  showAiTextureDialog: false,
 
   textureFileName: "",
   textureViewMode: "source",
@@ -128,10 +129,10 @@ export function StudioPage() {
     pieces,
     textures,
     selectedPieceId,
-    sourceType,
     prompt,
     job,
     notice,
+    showAiTextureDialog,
 
     textureFileName,
     textureViewMode,
@@ -165,10 +166,10 @@ export function StudioPage() {
   const setPieces = (value: SetStateAction<Piece[]>) => setField("pieces", value);
   const setTextures = (value: SetStateAction<Texture[]>) => setField("textures", value);
   const setSelectedPieceId = (value: SetStateAction<string>) => setField("selectedPieceId", value);
-  const setSourceType = (value: SetStateAction<StudioState["sourceType"]>) => setField("sourceType", value);
   const setPrompt = (value: SetStateAction<string>) => setField("prompt", value);
   const setJob = (value: SetStateAction<Job | null>) => setField("job", value);
   const setNotice = (value: SetStateAction<string>) => setField("notice", value);
+  const setShowAiTextureDialog = (value: SetStateAction<boolean>) => setField("showAiTextureDialog", value);
 
   const setTextureFileName = (value: SetStateAction<string>) => setField("textureFileName", value);
   const setTextureViewMode = (value: SetStateAction<StudioState["textureViewMode"]>) => setField("textureViewMode", value);
@@ -195,6 +196,8 @@ export function StudioPage() {
   const setGlobalLocked = (value: SetStateAction<boolean>) => setField("globalLocked", value);
   const prevJobRef = useRef<Job | null>(null);
   const layerRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fabricInputRef = useRef<HTMLInputElement | null>(null);
+  const garmentInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -294,7 +297,7 @@ export function StudioPage() {
     return asset;
   }
 
-  async function handleTexture(file?: File) {
+  async function handleTexture(sourceType: TextureSourceType, file?: File) {
     if (!project) return;
     try {
       let assetId = "";
@@ -309,6 +312,7 @@ export function StudioPage() {
       const texture = done.output.texture as Texture;
       setTextures((current) => [texture, ...current]);
       setTextureViewMode(texture.fit_source || texture.fit_source_recommendation || "source");
+      if (sourceType === "ai") setShowAiTextureDialog(false);
     } catch (error) {
       setNotice(readError(error));
     }
@@ -385,9 +389,9 @@ export function StudioPage() {
     if (!selectedPiece) return;
     const defaultTransform = pieceDefaults[selectedPiece.id];
     if (defaultTransform) {
-      void patchSelected(defaultTransform);
+      void patchSelected({ ...defaultTransform, locked: selectedPiece.transform.locked });
     } else {
-      void patchSelected(emptyTransform);
+      void patchSelected({ ...emptyTransform, locked: selectedPiece.transform.locked });
     }
   }
 
@@ -589,8 +593,7 @@ export function StudioPage() {
     <main className="min-h-screen bg-mist p-4 text-ink">
       <header className="mb-4 grid grid-cols-[1fr_auto] items-center gap-4 rounded-lg border border-line bg-white px-5 py-4 shadow-panel max-[980px]:grid-cols-1">
         <div>
-          <p className="m-0 text-sm font-semibold text-jade">生产打样工作台</p>
-          <h1 className="m-0 mt-1 text-3xl font-bold">服装裁片</h1>
+          <h1 className="m-0 text-3xl font-bold">服装裁片</h1>
           <p className="m-0 mt-2 text-sm text-slate-500">{notice}</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -602,14 +605,15 @@ export function StudioPage() {
 
       <div className="grid grid-cols-[340px_minmax(720px,1fr)_minmax(520px,0.95fr)] gap-4 max-[1500px]:grid-cols-1">
         <aside className="space-y-4">
-          <Panel title="素材">
+          <Panel
+            title="套装"
+            action={
+              <Link href="/templates" target="_blank" className="text-xs text-action hover:underline">
+                管理套装
+              </Link>
+            }
+          >
             <div className="grid gap-2">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-semibold">选择套装</label>
-                <Link href="/templates" target="_blank" className="text-xs text-action hover:underline">
-                  管理套装
-                </Link>
-              </div>
               <select
                 className="rounded-lg border border-line bg-white px-3 py-2"
                 value={selectedSetId}
@@ -630,37 +634,61 @@ export function StudioPage() {
               </select>
               <p className="text-xs leading-5 text-slate-500">选择已确认的模板套装，自动加载基准尺寸及裁片。</p>
             </div>
-            <div className="mt-4 grid gap-2">
-              <label className="text-sm font-semibold">布料来源</label>
-              <select className="rounded-lg border border-line bg-white px-3 py-2" value={sourceType} onChange={(event) => setSourceType(event.target.value as typeof sourceType)}>
-                <option value="pattern">图案平铺</option>
-                <option value="garment_photo">已有衣服复刻</option>
-                <option value="ai">AI 生成</option>
-                <option value="library">纹理库</option>
-              </select>
-            </div>
-            <textarea
-              className="mt-3 min-h-24 w-full resize-y rounded-lg border border-line px-3 py-2 text-sm"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-            />
-            <FileField label="上传图案或衣服照片" accept="image/*" selectedName={textureFileName} onFile={handleTexture} />
-            <button className="mt-3 w-full rounded-lg bg-ink px-4 py-2 font-semibold text-white" onClick={() => handleTexture()}>
-              仅用 Prompt 生成
-            </button>
-            <div className="mt-3 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
-              <div>素材图：{textureFileName || "未上传"}</div>
-              <div>
-                上传素材：{assetSummary.total} 个（图案 {assetSummary.patternCount} / 衣照 {assetSummary.garmentPhotoCount}）
-              </div>
-            </div>
           </Panel>
 
           <Panel title="纹理">
-            {activeTexture ? (
-              <div className="space-y-3">
-                <img className="checkerboard h-48 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前纹理" />
-                <p className="m-0 text-xs text-slate-500">纹理大小：{activeTexture.width} x {activeTexture.height}</p>
+            <div className="space-y-2">
+              <div className="flex justify-center gap-2">
+                <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
+                  上传布料
+                </button>
+                <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
+                  上传衣服
+                </button>
+                <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => setShowAiTextureDialog(true)}>
+                  AI 生成
+                </button>
+              </div>
+              <input
+                ref={fabricInputRef}
+                className="hidden"
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleTexture("pattern", file);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <input
+                ref={garmentInputRef}
+                className="hidden"
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleTexture("garment_photo", file);
+                  event.currentTarget.value = "";
+                }}
+              />
+              {activeTexture ? (
+                <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前纹理" />
+              ) : (
+                <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm text-slate-500">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                  暂无纹理
+                </div>
+              )}
+              <p className="m-0 text-xs text-slate-500">
+                {activeTexture ? `纹理大小：${activeTexture.width} x ${activeTexture.height}` : "纹理大小：未生成"}
+              </p>
+              <p className="m-0 text-xs text-slate-500">素材图：{textureFileName || "未上传"}</p>
+              {activeTexture ? (
+                <>
                 <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
                   系统建议：{recommendationLabel}。{readAnalysisReason(activeTexture.analysis)}
                 </p>
@@ -694,19 +722,16 @@ export function StudioPage() {
                     Offset 修缝
                   </button>
                 </div>
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500">上传图案或使用 Prompt 生成纹理。</p>
-            )}
+                </>
+              ) : (
+                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">上传布料、上传衣服复刻，或使用 AI 生成纹理。</p>
+              )}
+            </div>
 
           </Panel>
 
           <Panel title="全局适配">
             <div className="grid gap-3 text-sm">
-              <div className="rounded-lg border border-line p-3">
-                <h3 className="m-0 text-sm font-semibold">全局设计画布</h3>
-                <p className="m-0 mt-1 text-xs leading-5 text-slate-500">在右侧「设计画布」中直接调节全局参数。</p>
-              </div>
               <label className="grid gap-1">
                 <span className="font-semibold">衣服类型</span>
                 <select className="rounded-lg border border-line bg-white px-3 py-2" value={garmentType} onChange={(event) => setGarmentType(event.target.value as typeof garmentType)}>
@@ -852,122 +877,10 @@ export function StudioPage() {
               onPatchTransform={patchSelected}
               onResetPiece={resetPieceToDefault}
             />
-
-            <Panel title="当前裁片参数">
-              {selectedPiece ? (
-                selectedPiece.mirror_of ? (
-                  <div className="grid gap-4">
-                    <div className="rounded-lg border border-line bg-slate-50 p-4 text-center text-sm text-slate-600">
-                      <p className="font-semibold">当前裁片已关联</p>
-                      <p className="mt-1">内容跟随「{pieces.find((p) => p.id === selectedPiece.mirror_of)?.name || "未知裁片"}」</p>
-                      <p className="mt-2 text-xs text-slate-400">请在左侧列表点击源裁片进行编辑。</p>
-                    </div>
-                    <div className="rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
-                      <div>模式：{selectedPiece.transform.mode === "global_canvas" ? "全局设计画布" : "单片局部"}</div>
-                      <div>部位：{PIECE_ROLE_LABELS[selectedPiece.transform.piece_role || ""] || selectedPiece.transform.piece_role || "未识别"}</div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid gap-4">
-                    {selectedPiece.transform.mode === "global_canvas" && (
-                      <section className="grid gap-3 rounded-lg border border-line p-3">
-                        <div>
-                          <h3 className="m-0 text-sm font-semibold">全局取样</h3>
-                          <p className="m-0 mt-1 text-xs leading-5 text-slate-500">控制当前裁片在整张设计画布中的位置，裁片内容直接来自同一张全局画布。</p>
-                        </div>
-                        <div className="grid gap-4 min-[980px]:grid-cols-2">
-                          <Range label="全局 X" description="裁片左上角在全局画布中的左右位置。" value={selectedPiece.transform.design_x ?? 0} min={0} max={8192} onChange={(value) => patchSelected({ design_x: value })} />
-                          <Range label="全局 Y" description="裁片左上角在全局画布中的上下位置。" value={selectedPiece.transform.design_y ?? 0} min={0} max={8192} onChange={(value) => patchSelected({ design_y: value })} />
-                        </div>
-                      </section>
-                    )}
-                    <section className="grid gap-3 rounded-lg border border-line p-3">
-                      <div>
-                        <h3 className="m-0 text-sm font-semibold">单片微调</h3>
-                        <p className="m-0 mt-1 text-xs leading-5 text-slate-500">
-                          {selectedPiece.transform.mode === "global_canvas" ? "只移动当前裁片在全局画布下的花位；单片缩放和旋转在高级参数中按需微调。" : "只影响当前裁片内部花位。"}
-                        </p>
-                      </div>
-                      <div className="grid gap-4 min-[980px]:grid-cols-2">
-                        <Range label="平移 X" description="当前裁片内左右移动图案。" value={selectedPiece.transform.offset_x} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_x: value })} />
-                        <Range label="平移 Y" description="当前裁片内上下移动图案。" value={selectedPiece.transform.offset_y} min={-1500} max={1500} onChange={(value) => patchSelected({ offset_y: value })} />
-                      </div>
-                    </section>
-                    <section className="grid gap-3 rounded-lg border border-line p-3">
-                      <h3 className="m-0 text-sm font-semibold">基础设置</h3>
-                      <label className="grid gap-1 text-sm font-semibold">
-                        <span>裁片角色</span>
-                        <select className="rounded-lg border border-line bg-white px-3 py-2" value={selectedPiece.transform.piece_role || "unknown"} onChange={(event) => patchSelected({ piece_role: event.target.value, role_confirmed: true })}>
-                          {Object.entries(PIECE_ROLE_LABELS).map(([value, label]) => (
-                            <option key={value} value={value}>{label}</option>
-                          ))}
-                        </select>
-                        <span className="text-xs font-normal leading-5 text-slate-500">告诉系统这块裁片是什么部位，影响主视觉和安全区判断。</span>
-                      </label>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <label className="rounded-lg border border-line p-2">
-                          <input type="checkbox" checked={Boolean(selectedPiece.transform.role_confirmed)} onChange={(event) => patchSelected({ role_confirmed: event.target.checked })} /> 人工确认
-                          <span className="mt-1 block text-xs leading-5 text-slate-500">锁定当前部位判断。</span>
-                        </label>
-                        <label className="rounded-lg border border-line p-2">
-                          <input type="checkbox" checked={selectedPiece.transform.global_enabled ?? true} onChange={(event) => patchSelected({ global_enabled: event.target.checked })} /> 参与全局
-                          <span className="mt-1 block text-xs leading-5 text-slate-500">关闭后不按全局画布取样。</span>
-                        </label>
-                        <label className="rounded-lg border border-line p-2">
-                          <input type="checkbox" checked={selectedPiece.transform.locked} onChange={(event) => patchSelected({ locked: event.target.checked })} /> 锁定裁片
-                          <span className="mt-1 block text-xs leading-5 text-slate-500">避免误拖动或误改参数。</span>
-                        </label>
-                      </div>
-                    </section>
-                    <details className="rounded-lg border border-line p-3">
-                      <summary className="cursor-pointer text-sm font-semibold">高级参数</summary>
-                      <div className="mt-3 grid gap-4 min-[980px]:grid-cols-2">
-                        <Range label="单片缩放" description="叠加在全局设计画布之后，只影响当前裁片，默认保持 1。" value={selectedPiece.transform.scale} min={0.2} max={6} step={0.01} onChange={(value) => patchSelected({ scale: value })} />
-                        <Range label="单片旋转" description="叠加在全局设计画布方向之后，只影响当前裁片，默认保持 0。" value={selectedPiece.transform.rotation} min={-180} max={180} onChange={(value) => patchSelected({ rotation: value })} />
-                        <label className="grid gap-1 text-sm font-semibold">
-                          <span>配对编号</span>
-                          <input className="rounded-lg border border-line px-3 py-2" value={selectedPiece.transform.pair_id || ""} onChange={(event) => patchSelected({ pair_id: event.target.value })} placeholder="例如 pair_front" />
-                          <span className="text-xs font-normal leading-5 text-slate-500">用于把左右片或成组裁片绑定，后续做同步和镜像联动。</span>
-                        </label>
-                        <label className="grid gap-1 text-sm font-semibold">
-                          <span>配对方向</span>
-                          <select className="rounded-lg border border-line bg-white px-3 py-2" value={selectedPiece.transform.pair_side || ""} onChange={(event) => patchSelected({ pair_side: event.target.value as PieceTransform["pair_side"] })}>
-                            <option value="">未设置</option>
-                            <option value="left">左</option>
-                            <option value="right">右</option>
-                            <option value="none">无配对</option>
-                          </select>
-                          <span className="text-xs font-normal leading-5 text-slate-500">标记当前裁片在配对中的左、右或不配对。</span>
-                        </label>
-                        <label className="rounded-lg border border-line p-2 text-sm">
-                          <input type="checkbox" checked={selectedPiece.transform.mirror_x} onChange={(event) => patchSelected({ mirror_x: event.target.checked })} /> 左右镜像
-                          <span className="mt-1 block text-xs leading-5 text-slate-500">把当前裁片取样结果左右翻转。</span>
-                        </label>
-                        <label className="rounded-lg border border-line p-2 text-sm">
-                          <input type="checkbox" checked={selectedPiece.transform.mirror_y} onChange={(event) => patchSelected({ mirror_y: event.target.checked })} /> 上下镜像
-                          <span className="mt-1 block text-xs leading-5 text-slate-500">把当前裁片取样结果上下翻转。</span>
-                        </label>
-                      </div>
-                    </details>
-                    <button className="rounded-lg bg-white px-4 py-2 font-semibold text-ink ring-1 ring-line" onClick={() => patchSelected(emptyTransform)}>
-                      重置当前裁片
-                    </button>
-                  <div className="rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
-                    <div>模式：{selectedPiece.transform.mode === "global_canvas" ? "全局设计画布" : "单片局部"}</div>
-                    <div>部位：{PIECE_ROLE_LABELS[selectedPiece.transform.piece_role || ""] || selectedPiece.transform.piece_role || "未识别"}</div>
-                    <div>置信度：{Math.round((selectedPiece.transform.fit_confidence ?? 0) * 100)}%</div>
-                    {selectedPiece.transform.fit_note && <div>{selectedPiece.transform.fit_note}</div>}
-                  </div>
-                </div>
-              )
-            ) : (
-              <p className="text-sm text-slate-500">请选择裁片。</p>
-            )}
-            </Panel>
           </div>
         </section>
 
-                <LayoutPreview
+        <LayoutPreview
           pieces={pieces}
           selectedPieceId={selectedPieceId}
           textureUrl={workspaceTextureUrl}
@@ -1007,6 +920,52 @@ export function StudioPage() {
           onToggleLocked={() => setGlobalLocked((v) => !v)}
         />
       </div>
+      {showAiTextureDialog && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-4">
+          <form
+            className="w-full max-w-2xl rounded-lg border border-white/10 bg-zinc-900 p-4 text-white shadow-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleTexture("ai");
+            }}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex gap-2">
+                <button type="button" className="rounded-lg border border-white/15 px-4 py-3 text-xs text-zinc-300">
+                  风格
+                </button>
+                <button type="button" className="rounded-lg border border-white/15 px-4 py-3 text-xs text-zinc-300">
+                  标记
+                </button>
+                <button type="button" className="rounded-lg border border-white/15 px-4 py-3 text-xs text-zinc-300">
+                  聚焦
+                </button>
+              </div>
+              <button type="button" className="rounded-md px-2 py-1 text-zinc-400 hover:bg-white/10 hover:text-white" onClick={() => setShowAiTextureDialog(false)}>
+                x
+              </button>
+            </div>
+            <textarea
+              className="min-h-28 w-full resize-y rounded-lg border border-transparent bg-transparent px-1 py-2 text-sm text-white outline-none placeholder:text-zinc-500"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="描述你想要生成的画面内容，按 / 呼出指令，@ 引用素材"
+              autoFocus
+            />
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
+              <span>Lib Nano Pro</span>
+              <span className="rounded-md border border-white/15 px-2 py-1">16:9</span>
+              <span className="rounded-md border border-white/15 px-2 py-1">2K</span>
+              <span className="rounded-md border border-white/15 px-2 py-1">摄像机</span>
+              <span className="rounded-md border border-white/15 px-2 py-1">全景</span>
+              <span className="ml-auto rounded-md border border-white/15 px-2 py-1">1张</span>
+              <button type="submit" className="rounded-lg bg-zinc-200 px-4 py-2 font-semibold text-zinc-900">
+                生成
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       <ToastNotice notice={notice} job={job} />
 
 

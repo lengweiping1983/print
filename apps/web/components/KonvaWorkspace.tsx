@@ -436,7 +436,11 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
         </Stage>
         {selected && onPatchTransform && !selected.mirror_of && (
           <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
-            <PieceToolbarButton label="X" value={selected.transform.design_x ?? 0}>
+            <ToolbarLockButton locked={selected.transform.locked} onToggle={() => onPatchTransform({ locked: !selected.transform.locked })} />
+            {onResetPiece && (
+              <ToolbarResetButton onReset={onResetPiece} disabled={selected.transform.locked} />
+            )}
+            <PieceToolbarButton label="X" value={selected.transform.design_x ?? 0} disabled={selected.transform.locked}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-semibold">全局 X</span>
                 <span className="text-sm font-bold">{selected.transform.design_x ?? 0}</span>
@@ -447,11 +451,12 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
                 max={8192}
                 value={selected.transform.design_x ?? 0}
                 onChange={(e) => onPatchTransform({ design_x: Number(e.target.value) })}
+                disabled={selected.transform.locked}
                 className="w-full accent-action"
               />
               <p className="mt-1.5 text-xs leading-5 text-slate-500">裁片左上角在全局画布中的左右位置。</p>
             </PieceToolbarButton>
-            <PieceToolbarButton label="Y" value={selected.transform.design_y ?? 0}>
+            <PieceToolbarButton label="Y" value={selected.transform.design_y ?? 0} disabled={selected.transform.locked}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-semibold">全局 Y</span>
                 <span className="text-sm font-bold">{selected.transform.design_y ?? 0}</span>
@@ -462,11 +467,12 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
                 max={8192}
                 value={selected.transform.design_y ?? 0}
                 onChange={(e) => onPatchTransform({ design_y: Number(e.target.value) })}
+                disabled={selected.transform.locked}
                 className="w-full accent-action"
               />
               <p className="mt-1.5 text-xs leading-5 text-slate-500">裁片左上角在全局画布中的上下位置。</p>
             </PieceToolbarButton>
-            <PieceToolbarButton label="缩" value={selected.transform.scale}>
+            <PieceToolbarButton label="缩" value={selected.transform.scale} disabled={selected.transform.locked}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-semibold">单片缩放</span>
                 <span className="text-sm font-bold">{selected.transform.scale.toFixed(2)}</span>
@@ -478,11 +484,12 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
                 step={0.01}
                 value={selected.transform.scale}
                 onChange={(e) => onPatchTransform({ scale: Number(e.target.value) })}
+                disabled={selected.transform.locked}
                 className="w-full accent-action"
               />
               <p className="mt-1.5 text-xs leading-5 text-slate-500">叠加在全局设计画布之后，只影响当前裁片，默认保持 1。</p>
             </PieceToolbarButton>
-            <PieceToolbarButton label="转" value={selected.transform.rotation}>
+            <PieceToolbarButton label="转" value={selected.transform.rotation} disabled={selected.transform.locked}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-semibold">单片旋转</span>
                 <span className="text-sm font-bold">{selected.transform.rotation}</span>
@@ -493,55 +500,11 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
                 max={180}
                 value={selected.transform.rotation}
                 onChange={(e) => onPatchTransform({ rotation: Number(e.target.value) })}
+                disabled={selected.transform.locked}
                 className="w-full accent-action"
               />
               <p className="mt-1.5 text-xs leading-5 text-slate-500">叠加在全局设计画布方向之后，只影响当前裁片，默认保持 0。</p>
             </PieceToolbarButton>
-            <div className="group relative">
-              <button
-                className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 transition hover:-translate-y-0.5 ${
-                  selected.transform.locked
-                    ? "bg-amber-100 text-amber-700 ring-amber-200"
-                    : "bg-white text-ink ring-line hover:bg-slate-50"
-                }`}
-                onClick={() => onPatchTransform({ locked: !selected.transform.locked })}
-              >
-                {selected.transform.locked ? "锁" : "开"}
-              </button>
-              <div className="pointer-events-none absolute right-full top-1/2 mr-2 w-56 -translate-y-1/2 rounded-xl border border-line bg-white p-3 opacity-0 shadow-xl transition group-hover:pointer-events-auto group-hover:opacity-100">
-                <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-action"
-                    checked={selected.transform.locked}
-                    onChange={(e) => onPatchTransform({ locked: e.target.checked })}
-                  />
-                  <span className="text-sm font-semibold">锁定裁片</span>
-                </label>
-                <p className="mt-1.5 text-xs leading-5 text-slate-500">避免误拖动或误改参数。</p>
-              </div>
-            </div>
-            {onResetPiece && (
-              <div className="group relative">
-                <button
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-bold text-red-600 shadow ring-1 ring-line transition hover:-translate-y-0.5 hover:bg-red-50"
-                  onClick={onResetPiece}
-                >
-                  重
-                </button>
-                <div className="pointer-events-none absolute right-full top-1/2 mr-2 w-56 -translate-y-1/2 rounded-xl border border-line bg-white p-3 opacity-0 shadow-xl transition group-hover:pointer-events-auto group-hover:opacity-100">
-                  <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
-                  <button
-                    className="w-full rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
-                    onClick={onResetPiece}
-                  >
-                    重置当前裁片
-                  </button>
-                  <p className="mt-1.5 text-xs leading-5 text-slate-500">将当前裁片的所有参数恢复为默认值。</p>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -736,7 +699,9 @@ export function LayoutPreview({
         </div>
         {previewMode === "design" && pieces.length > 0 && (
           <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
-            <PieceToolbarButton label="X" value={globalOffsetX}>
+            <ToolbarLockButton locked={locked} onToggle={onToggleLocked} />
+            <ToolbarResetButton onReset={onResetGlobalFit} disabled={locked} />
+            <PieceToolbarButton label="X" value={globalOffsetX} disabled={locked}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-semibold">全局平移 X</span>
                 <span className="text-sm font-bold">{globalOffsetX}</span>
@@ -752,7 +717,7 @@ export function LayoutPreview({
               />
               <p className="mt-1.5 text-xs leading-5 text-slate-500">左右移动整张设计画布。</p>
             </PieceToolbarButton>
-            <PieceToolbarButton label="Y" value={globalOffsetY}>
+            <PieceToolbarButton label="Y" value={globalOffsetY} disabled={locked}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-semibold">全局平移 Y</span>
                 <span className="text-sm font-bold">{globalOffsetY}</span>
@@ -768,7 +733,7 @@ export function LayoutPreview({
               />
               <p className="mt-1.5 text-xs leading-5 text-slate-500">上下移动整张设计画布。</p>
             </PieceToolbarButton>
-            <PieceToolbarButton label="缩" value={globalTextureScale.toFixed(2)}>
+            <PieceToolbarButton label="缩" value={globalTextureScale.toFixed(2)} disabled={locked}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-semibold">全局缩放</span>
                 <span className="text-sm font-bold">{globalTextureScale.toFixed(2)}</span>
@@ -785,7 +750,7 @@ export function LayoutPreview({
               />
               <p className="mt-1.5 text-xs leading-5 text-slate-500">控制整张设计画布的花纹大小和密度，默认 1。</p>
             </PieceToolbarButton>
-            <PieceToolbarButton label="转" value={textureAngle}>
+            <PieceToolbarButton label="转" value={textureAngle} disabled={locked}>
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-sm font-semibold">全局旋转</span>
                 <span className="text-sm font-bold">{textureAngle}</span>
@@ -801,25 +766,6 @@ export function LayoutPreview({
               />
               <p className="mt-1.5 text-xs leading-5 text-slate-500">控制整张设计画布的纹理方向，默认 0 度。</p>
             </PieceToolbarButton>
-            <button
-              className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 transition hover:-translate-y-0.5 ${
-                locked
-                  ? "bg-amber-100 text-amber-700 ring-amber-200"
-                  : "bg-white text-ink ring-line hover:bg-slate-50"
-              }`}
-              onClick={onToggleLocked}
-              title={locked ? "解锁全局画布" : "锁定全局画布"}
-            >
-              {locked ? "锁" : "开"}
-            </button>
-            <button
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-bold text-red-600 shadow ring-1 ring-line transition hover:-translate-y-0.5 hover:bg-red-50 disabled:opacity-50"
-              onClick={onResetGlobalFit}
-              disabled={locked}
-              title="重置全局参数"
-            >
-              重
-            </button>
             <button
               className="flex h-9 w-9 items-center justify-center rounded-full bg-jade text-xs font-bold text-white shadow ring-1 ring-jade transition hover:-translate-y-0.5 disabled:opacity-50"
               disabled={!canApplyGlobalFit || locked}
@@ -1075,15 +1021,71 @@ function ZoomButton({ label, onClick, active }: { label: string; onClick: () => 
   );
 }
 
-function PieceToolbarButton({ label, value, children }: { label: string; value: string | number; children: ReactNode }) {
+function PieceToolbarButton({ label, value, children, disabled }: { label: string; value: string | number; children: ReactNode; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="group relative">
-      <button className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-xs font-bold text-ink shadow ring-1 ring-line transition hover:-translate-y-0.5 hover:bg-slate-50">
+    <div className="relative" onMouseEnter={() => !disabled && setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        disabled={disabled}
+        className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 ring-line transition hover:-translate-y-0.5 ${
+          disabled ? "bg-slate-100 text-slate-400" : "bg-white text-ink hover:bg-slate-50"
+        }`}
+      >
         {label}
       </button>
-      <div className="pointer-events-none absolute right-full top-1/2 mr-2 w-56 -translate-y-1/2 rounded-xl border border-line bg-white p-3 opacity-0 shadow-xl transition group-hover:pointer-events-auto group-hover:opacity-100">
+      <div className={`absolute right-full top-1/2 w-56 -translate-y-1/2 -translate-x-2 rounded-xl border border-line bg-white p-3 shadow-xl transition ${open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>
         <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
         {children}
+      </div>
+    </div>
+  );
+}
+
+function ToolbarLockButton({ locked, onToggle }: { locked: boolean; onToggle: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 transition hover:-translate-y-0.5 ${
+          locked
+            ? "bg-amber-100 text-amber-700 ring-amber-200"
+            : "bg-white text-ink ring-line hover:bg-slate-50"
+        }`}
+        onClick={onToggle}
+      >
+        {locked ? "锁" : "开"}
+      </button>
+      <div className={`absolute right-full top-1/2 w-56 -translate-y-1/2 -translate-x-2 rounded-xl border border-line bg-white p-3 shadow-xl transition ${open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>
+        <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
+        <label className="flex cursor-pointer items-center gap-2">
+          <input type="checkbox" className="h-4 w-4 accent-action" checked={locked} onChange={onToggle} />
+          <span className="text-sm font-semibold">锁定裁片</span>
+        </label>
+        <p className="mt-1.5 text-xs leading-5 text-slate-500">避免误拖动或误改参数。</p>
+      </div>
+    </div>
+  );
+}
+
+function ToolbarResetButton({ onReset, disabled }: { onReset: () => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative" onMouseEnter={() => !disabled && setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 ring-line transition hover:-translate-y-0.5 ${
+          disabled ? "bg-slate-100 text-slate-400" : "bg-white text-red-600 hover:bg-red-50"
+        }`}
+        onClick={onReset}
+        disabled={disabled}
+      >
+        重
+      </button>
+      <div className={`absolute right-full top-1/2 w-56 -translate-y-1/2 -translate-x-2 rounded-xl border border-line bg-white p-3 shadow-xl transition ${open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>
+        <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
+        <button className="w-full rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700" onClick={onReset}>
+          重置当前裁片
+        </button>
+        <p className="mt-1.5 text-xs leading-5 text-slate-500">将当前裁片的所有参数恢复为默认值。</p>
       </div>
     </div>
   );

@@ -135,10 +135,13 @@ export function SafetyReportList({ report }: { report: SafetyReportItem[] }) {
   );
 }
 
-export function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+export function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children?: React.ReactNode }) {
   return (
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
-      <h2 className="m-0 mb-3 text-lg font-semibold">{title}</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="m-0 text-lg font-semibold">{title}</h2>
+        {action}
+      </div>
       {children}
     </section>
   );

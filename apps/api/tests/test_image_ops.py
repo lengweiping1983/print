@@ -234,6 +234,20 @@ def test_repeated_tile_helpers_expand_small_tiles_only() -> None:
     repeated.close()
 
 
+def test_paint_tiled_clips_large_edge_tiles_without_decompression_error() -> None:
+    from app import image_ops
+
+    canvas = Image.new("RGBA", (6923, 6933), (0, 0, 0, 0))
+    tile = Image.new("RGBA", (7244, 7244), (20, 80, 160, 255))
+
+    image_ops.paint_tiled(canvas, tile, -7244, -7244)
+
+    assert canvas.getpixel((0, 0)) == (20, 80, 160, 255)
+    assert canvas.getpixel((6922, 6932)) == (20, 80, 160, 255)
+    tile.close()
+    canvas.close()
+
+
 def test_render_piece_from_design_canvas_ignores_legacy_sample_size(tmp_path: Path) -> None:
     mask = tmp_path / "piece_mask.png"
     Image.new("L", (20, 20), 255).save(mask)
