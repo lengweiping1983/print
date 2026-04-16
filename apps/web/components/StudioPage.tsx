@@ -244,6 +244,7 @@ export function StudioPage() {
   const [aiResolution, setAiResolution] = useState<"1K" | "2K" | "4K">("2K");
   const [aiRatio, setAiRatio] = useState<"1:1" | "9:16" | "16:9" | "3:4" | "4:3">("1:1");
   const [showParamMenu, setShowParamMenu] = useState(false);
+  const [activeLeftTab, setActiveLeftTab] = useState<"materials" | "global" | "layers">("materials");
   const paramMenuRef = useRef<HTMLDivElement | null>(null);
   const [aiDialogMode, setAiDialogMode] = useState<"texture" | "layer">("texture");
 
@@ -762,331 +763,356 @@ export function StudioPage() {
 
       <div className="grid grid-cols-[340px_minmax(720px,1fr)_minmax(520px,0.95fr)] gap-4 max-[1500px]:grid-cols-1">
         <aside className="space-y-4">
-          <Panel
-            title="套装"
-            action={
-              <Link href="/templates" target="_blank" className="text-xs text-action hover:underline">
-                管理套装
-              </Link>
-            }
-          >
-            <div className="grid gap-2">
-              <select
-                className="rounded-lg border border-line bg-white px-3 py-2"
-                value={selectedSetId}
-                onChange={(event) => {
-                  const setId = event.target.value;
-                  setSelectedSetId(setId);
-                  if (setId) {
-                    void loadFromTemplateSet(setId);
-                  } else {
-                    setPieces([]);
-                    setAssets([]);
-                    setTextures([]);
-                    setDesignCanvas(null);
-                    setSelectedPieceId("");
-                    setProject(null);
-                    localStorage.removeItem(LAST_PROJECT_KEY);
-                  }
-                }}
+          <div className="flex rounded-lg border border-line bg-white p-1 shadow-panel">
+            {[
+              { key: "materials", label: "素材" },
+              { key: "global", label: "全局适配" },
+              { key: "layers", label: "图层" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`flex-1 rounded-md px-2 py-1.5 text-sm font-semibold ${activeLeftTab === tab.key ? "bg-ink text-white" : "text-ink hover:bg-slate-50"}`}
+                onClick={() => setActiveLeftTab(tab.key as typeof activeLeftTab)}
               >
-                <option value="">未选择套装</option>
-                {templateSets.map((set) => (
-                  <option key={set.id} value={set.id}>
-                    {set.name} {set.version_label ? `(${set.version_label})` : ""}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs leading-5 text-slate-500">选择已确认的模板套装，自动加载基准尺寸及裁片。</p>
-            </div>
-          </Panel>
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-          <Panel
-            title="面料"
-            action={
-              <div className="flex gap-2">
-                <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
-                  上传面料
-                </button>
-                <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
-                  上传衣服
-                </button>
-                <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => { setAiDialogMode("texture"); setShowAiTextureDialog(true); }}>
-                  AI 生图
-                </button>
-              </div>
-            }
-          >
-            <div className="space-y-2">
-              <input
-                ref={fabricInputRef}
-                className="hidden"
-                type="file"
-                accept="image/*"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void handleTexture("pattern", file);
-                  event.currentTarget.value = "";
-                }}
-              />
-              <input
-                ref={garmentInputRef}
-                className="hidden"
-                type="file"
-                accept="image/*"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void handleTexture("garment_photo", file);
-                  event.currentTarget.value = "";
-                }}
-              />
-              <div className="relative">
-                {activeTexture ? (
-                  <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前面料" />
-                ) : (
-                  <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm text-slate-500">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                      <circle cx="8.5" cy="8.5" r="1.5" />
-                      <polyline points="21 15 16 10 5 21" />
-                    </svg>
-                    暂无面料
+          {activeLeftTab === "materials" && (
+            <>
+              <Panel
+                title="套装"
+                action={
+                  <Link href="/templates" target="_blank" className="text-xs text-action hover:underline">
+                    管理套装
+                  </Link>
+                }
+              >
+                <div className="grid gap-2">
+                  <select
+                    className="rounded-lg border border-line bg-white px-3 py-2"
+                    value={selectedSetId}
+                    onChange={(event) => {
+                      const setId = event.target.value;
+                      setSelectedSetId(setId);
+                      if (setId) {
+                        void loadFromTemplateSet(setId);
+                      } else {
+                        setPieces([]);
+                        setAssets([]);
+                        setTextures([]);
+                        setDesignCanvas(null);
+                        setSelectedPieceId("");
+                        setProject(null);
+                        localStorage.removeItem(LAST_PROJECT_KEY);
+                      }
+                    }}
+                  >
+                    <option value="">未选择套装</option>
+                    {templateSets.map((set) => (
+                      <option key={set.id} value={set.id}>
+                        {set.name} {set.version_label ? `(${set.version_label})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs leading-5 text-slate-500">选择已确认的模板套装，自动加载基准尺寸及裁片。</p>
+                </div>
+              </Panel>
+
+              <Panel
+                title="面料"
+                action={
+                  <div className="flex gap-2">
+                    <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
+                      上传面料
+                    </button>
+                    <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
+                      上传衣服
+                    </button>
+                    <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => { setAiDialogMode("texture"); setShowAiTextureDialog(true); }}>
+                      AI 生图
+                    </button>
                   </div>
+                }
+              >
+                <div className="space-y-2">
+                  <input
+                    ref={fabricInputRef}
+                    className="hidden"
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void handleTexture("pattern", file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <input
+                    ref={garmentInputRef}
+                    className="hidden"
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void handleTexture("garment_photo", file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <div className="relative">
+                    {activeTexture ? (
+                      <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前面料" />
+                    ) : (
+                      <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm text-slate-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                        暂无面料
+                      </div>
+                    )}
+                  </div>
+                  <p className="m-0 text-xs text-slate-500">
+                    {activeTexture ? `面料大小：${activeTexture.width} x ${activeTexture.height}` : "面料大小：未生成"}
+                  </p>
+                  {activeTexture ? (
+                    <>
+                    <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
+                      系统建议：{recommendationLabel}。{readAnalysisReason(activeTexture.analysis)}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold ring-1 ring-line ${
+                          textureViewMode === "source" || !hasSeamlessTexture ? "bg-ink text-white" : "bg-white text-ink"
+                        }`}
+                        onClick={() => setTextureViewMode("source")}
+                      >
+                        使用原图
+                      </button>
+                      <button
+                        className={`rounded-lg px-3 py-2 text-sm font-semibold ring-1 ring-line ${
+                          textureViewMode === "seamless" && hasSeamlessTexture ? "bg-ink text-white" : "bg-white text-ink"
+                        } ${hasSeamlessTexture ? "" : "opacity-50"}`}
+                        disabled={!hasSeamlessTexture}
+                        onClick={() => setTextureViewMode("seamless")}
+                      >
+                        使用无缝图
+                      </button>
+                    </div>
+                    <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                      当前适配输入：{textureViewMode === "seamless" && hasSeamlessTexture ? "无缝图" : "原图"}。无缝处理适合满版面料；透明底主体图案建议使用原图定位。
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={() => handleSeamless("mirror")}>
+                        镜像无缝
+                      </button>
+                      <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={() => handleSeamless("offset")}>
+                        Offset 修缝
+                      </button>
+                    </div>
+                    </>
+                  ) : (
+                    <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">上传面料、上传衣服复刻，或使用 AI 生图面料。</p>
+                  )}
+                </div>
+
+              </Panel>
+            </>
+          )}
+
+          {activeLeftTab === "global" && (
+            <Panel title="全局适配">
+              <div className="grid gap-3 text-sm">
+                <label className="grid gap-1">
+                  <span className="font-semibold">衣服类型</span>
+                  <select className="rounded-lg border border-line bg-white px-3 py-2" value={garmentType} onChange={(event) => setGarmentType(event.target.value as typeof garmentType)}>
+                    <option value="unknown">未知</option>
+                    <option value="t_shirt">T 恤</option>
+                    <option value="shirt">衬衫</option>
+                  </select>
+                  <span className="text-xs leading-5 text-slate-500">帮助系统识别前片、后片、袖片；不确定就选未知，后面仍可手动调整。</span>
+                </label>
+                <label className="grid gap-1">
+                  <span className="font-semibold">左右规则</span>
+                  <select className="rounded-lg border border-line bg-white px-3 py-2" value={globalSymmetry} onChange={(event) => setGlobalSymmetry(event.target.value as typeof globalSymmetry)}>
+                    <option value="continuous">连续统一</option>
+                    <option value="mirror">左右镜像</option>
+                  </select>
+                  <span className="text-xs leading-5 text-slate-500">连续统一适合水纹、迷彩、花纹；左右镜像适合需要对称的左右片。</span>
+                </label>
+                <label className="grid gap-1">
+                  <span className="font-semibold">主视觉中心</span>
+                  <select className="rounded-lg border border-line bg-white px-3 py-2" value={globalAnchor} onChange={(event) => setGlobalAnchor(event.target.value)}>
+                    <option value="front_center">前胸中心</option>
+                    <option value="back_center">后背中心</option>
+                    <option value="left_chest">左胸</option>
+                    <option value="right_chest">右胸</option>
+                    <option value="hem_center">下摆中心</option>
+                    <option value="sleeve_center">袖中线</option>
+                  </select>
+                  <span className="text-xs leading-5 text-slate-500">决定 logo、鱼、文字等主体优先对齐的位置；满版面料影响较小。</span>
+                </label>
+                <div className="grid gap-2 rounded-lg border border-line bg-white p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-semibold">安全区与缝份</span>
+                    <span className="text-xs text-slate-500">高级参数</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="grid gap-1">
+                      <span className="text-xs font-semibold text-slate-600">安全区 X 内缩</span>
+                      <input
+                        className="rounded-lg border border-line px-3 py-2"
+                        type="number"
+                        min={0}
+                        max={0.45}
+                        step={0.01}
+                        value={safeZoneInsetXRatio}
+                        onChange={(event) => updateFitZoneSetting("safe_zone_inset_x_ratio", Number(event.target.value))}
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="text-xs font-semibold text-slate-600">安全区 Y 内缩</span>
+                      <input
+                        className="rounded-lg border border-line px-3 py-2"
+                        type="number"
+                        min={0}
+                        max={0.45}
+                        step={0.01}
+                        value={safeZoneInsetYRatio}
+                        onChange={(event) => updateFitZoneSetting("safe_zone_inset_y_ratio", Number(event.target.value))}
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="text-xs font-semibold text-slate-600">缝份避让比例</span>
+                      <input
+                        className="rounded-lg border border-line px-3 py-2"
+                        type="number"
+                        min={0}
+                        max={0.45}
+                        step={0.01}
+                        value={avoidZoneSeamRatio}
+                        onChange={(event) => updateFitZoneSetting("avoid_zone_seam_ratio", Number(event.target.value))}
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="text-xs font-semibold text-slate-600">最小避让像素</span>
+                      <input
+                        className="rounded-lg border border-line px-3 py-2"
+                        type="number"
+                        min={0}
+                        max={200}
+                        step={1}
+                        value={avoidZoneMinPx}
+                        onChange={(event) => updateFitZoneSetting("avoid_zone_min_px", Number(event.target.value))}
+                      />
+                    </label>
+                  </div>
+                  <p className="m-0 text-xs leading-5 text-slate-500">默认值为 0.16 / 0.14 / 0.06 / 8，调整后下次自动适配会重新计算裁片安全区和缝份避让区。</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={handleAutoMap}>
+                    重新识别部位
+                  </button>
+                  <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || pieces.length === 0} onClick={handleGlobalFit}>
+                    自动适配并应用
+                  </button>
+                </div>
+                <p className="m-0 text-xs leading-5 text-slate-500">上传模板时已自动拆片并识别部位；这里不会重新拆模板，只会重建前片、后片、袖片等全局取样区域。</p>
+                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
+                  已启用全局坐标：{globalPieceCount}/{primaryPieceCount} 个主裁片；{linkedPieceCount} 个关联裁片由源裁片派生，不参与全局定位。
+                </p>
+                {manualPositionCount > 0 && (
+                  <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                    {manualPositionCount} 个裁片已锁定手动位置，自动适配会保留它们的取样坐标；重置当前裁片后可重新交给系统自动排布。
+                  </p>
                 )}
               </div>
-              <p className="m-0 text-xs text-slate-500">
-                {activeTexture ? `面料大小：${activeTexture.width} x ${activeTexture.height}` : "面料大小：未生成"}
-              </p>
-              {activeTexture ? (
-                <>
-                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
-                  系统建议：{recommendationLabel}。{readAnalysisReason(activeTexture.analysis)}
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    className={`rounded-lg px-3 py-2 text-sm font-semibold ring-1 ring-line ${
-                      textureViewMode === "source" || !hasSeamlessTexture ? "bg-ink text-white" : "bg-white text-ink"
-                    }`}
-                    onClick={() => setTextureViewMode("source")}
-                  >
-                    使用原图
-                  </button>
-                  <button
-                    className={`rounded-lg px-3 py-2 text-sm font-semibold ring-1 ring-line ${
-                      textureViewMode === "seamless" && hasSeamlessTexture ? "bg-ink text-white" : "bg-white text-ink"
-                    } ${hasSeamlessTexture ? "" : "opacity-50"}`}
-                    disabled={!hasSeamlessTexture}
-                    onClick={() => setTextureViewMode("seamless")}
-                  >
-                    使用无缝图
-                  </button>
-                </div>
-                <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-                  当前适配输入：{textureViewMode === "seamless" && hasSeamlessTexture ? "无缝图" : "原图"}。无缝处理适合满版面料；透明底主体图案建议使用原图定位。
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={() => handleSeamless("mirror")}>
-                    镜像无缝
-                  </button>
-                  <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={() => handleSeamless("offset")}>
-                    Offset 修缝
-                  </button>
-                </div>
-                </>
-              ) : (
-                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">上传面料、上传衣服复刻，或使用 AI 生图面料。</p>
-              )}
-            </div>
+            </Panel>
+          )}
 
-          </Panel>
-
-          <Panel title="全局适配">
-            <div className="grid gap-3 text-sm">
-              <label className="grid gap-1">
-                <span className="font-semibold">衣服类型</span>
-                <select className="rounded-lg border border-line bg-white px-3 py-2" value={garmentType} onChange={(event) => setGarmentType(event.target.value as typeof garmentType)}>
-                  <option value="unknown">未知</option>
-                  <option value="t_shirt">T 恤</option>
-                  <option value="shirt">衬衫</option>
-                </select>
-                <span className="text-xs leading-5 text-slate-500">帮助系统识别前片、后片、袖片；不确定就选未知，后面仍可手动调整。</span>
-              </label>
-              <label className="grid gap-1">
-                <span className="font-semibold">左右规则</span>
-                <select className="rounded-lg border border-line bg-white px-3 py-2" value={globalSymmetry} onChange={(event) => setGlobalSymmetry(event.target.value as typeof globalSymmetry)}>
-                  <option value="continuous">连续统一</option>
-                  <option value="mirror">左右镜像</option>
-                </select>
-                <span className="text-xs leading-5 text-slate-500">连续统一适合水纹、迷彩、花纹；左右镜像适合需要对称的左右片。</span>
-              </label>
-              <label className="grid gap-1">
-                <span className="font-semibold">主视觉中心</span>
-                <select className="rounded-lg border border-line bg-white px-3 py-2" value={globalAnchor} onChange={(event) => setGlobalAnchor(event.target.value)}>
-                  <option value="front_center">前胸中心</option>
-                  <option value="back_center">后背中心</option>
-                  <option value="left_chest">左胸</option>
-                  <option value="right_chest">右胸</option>
-                  <option value="hem_center">下摆中心</option>
-                  <option value="sleeve_center">袖中线</option>
-                </select>
-                <span className="text-xs leading-5 text-slate-500">决定 logo、鱼、文字等主体优先对齐的位置；满版面料影响较小。</span>
-              </label>
-              <div className="grid gap-2 rounded-lg border border-line bg-white p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-semibold">安全区与缝份</span>
-                  <span className="text-xs text-slate-500">高级参数</span>
+          {activeLeftTab === "layers" && (
+            <Panel
+              title="图层"
+              action={
+                <div className="flex gap-2">
+                  <button type="button" className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold text-ink ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
+                    添加文字层
+                  </button>
+                  <button type="button" className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => layerImageInputRef.current?.click()}>
+                    上传图片
+                  </button>
+                  <button type="button" className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => { setAiDialogMode("layer"); setShowAiTextureDialog(true); }}>
+                    AI 生图
+                  </button>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="grid gap-1">
-                    <span className="text-xs font-semibold text-slate-600">安全区 X 内缩</span>
-                    <input
-                      className="rounded-lg border border-line px-3 py-2"
-                      type="number"
-                      min={0}
-                      max={0.45}
-                      step={0.01}
-                      value={safeZoneInsetXRatio}
-                      onChange={(event) => updateFitZoneSetting("safe_zone_inset_x_ratio", Number(event.target.value))}
-                    />
-                  </label>
-                  <label className="grid gap-1">
-                    <span className="text-xs font-semibold text-slate-600">安全区 Y 内缩</span>
-                    <input
-                      className="rounded-lg border border-line px-3 py-2"
-                      type="number"
-                      min={0}
-                      max={0.45}
-                      step={0.01}
-                      value={safeZoneInsetYRatio}
-                      onChange={(event) => updateFitZoneSetting("safe_zone_inset_y_ratio", Number(event.target.value))}
-                    />
-                  </label>
-                  <label className="grid gap-1">
-                    <span className="text-xs font-semibold text-slate-600">缝份避让比例</span>
-                    <input
-                      className="rounded-lg border border-line px-3 py-2"
-                      type="number"
-                      min={0}
-                      max={0.45}
-                      step={0.01}
-                      value={avoidZoneSeamRatio}
-                      onChange={(event) => updateFitZoneSetting("avoid_zone_seam_ratio", Number(event.target.value))}
-                    />
-                  </label>
-                  <label className="grid gap-1">
-                    <span className="text-xs font-semibold text-slate-600">最小避让像素</span>
-                    <input
-                      className="rounded-lg border border-line px-3 py-2"
-                      type="number"
-                      min={0}
-                      max={200}
-                      step={1}
-                      value={avoidZoneMinPx}
-                      onChange={(event) => updateFitZoneSetting("avoid_zone_min_px", Number(event.target.value))}
-                    />
-                  </label>
-                </div>
-                <p className="m-0 text-xs leading-5 text-slate-500">默认值为 0.16 / 0.14 / 0.06 / 8，调整后下次自动适配会重新计算裁片安全区和缝份避让区。</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={handleAutoMap}>
-                  重新识别部位
-                </button>
-                <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || pieces.length === 0} onClick={handleGlobalFit}>
-                  自动适配并应用
-                </button>
-              </div>
-              <p className="m-0 text-xs leading-5 text-slate-500">上传模板时已自动拆片并识别部位；这里不会重新拆模板，只会重建前片、后片、袖片等全局取样区域。</p>
-              <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
-                已启用全局坐标：{globalPieceCount}/{primaryPieceCount} 个主裁片；{linkedPieceCount} 个关联裁片由源裁片派生，不参与全局定位。
-              </p>
-              {manualPositionCount > 0 && (
-                <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-                  {manualPositionCount} 个裁片已锁定手动位置，自动适配会保留它们的取样坐标；重置当前裁片后可重新交给系统自动排布。
-                </p>
-              )}
-            </div>
-          </Panel>
-
-          <Panel
-            title="图层"
-            action={
-              <div className="flex gap-2">
-                <button type="button" className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold text-ink ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
-                  添加文字层
-                </button>
-                <button type="button" className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => layerImageInputRef.current?.click()}>
-                  上传图片
-                </button>
-                <button type="button" className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => { setAiDialogMode("layer"); setShowAiTextureDialog(true); }}>
-                  AI 生图
-                </button>
-              </div>
-            }
-          >
-            <div className="grid gap-3 text-sm">
-              <input
-                ref={layerImageInputRef}
-                className="hidden"
-                type="file"
-                accept="image/*"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void handleLayerUpload(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-              {designLayers.length === 0 && (
-                <p className="m-0 text-xs leading-5 text-slate-500">
-                  先完成“自动适配面料”，生成全局设计画布后，可添加 logo、主图或号码文字。
-                </p>
-              )}
-              <div className="grid gap-2">
-                {designLayers.map((layer) => {
-                  const layerImageUrl = layer.source_url || (layer.asset_id ? assets.find((a) => a.id === layer.asset_id)?.url : "") || "";
-                  return (
-                    <button
-                      key={layer.id}
-                      className={`rounded-lg border px-3 py-2 text-left ${layer.id === selectedLayerId ? "border-jade bg-emerald-50" : "border-line bg-white"}`}
-                      onClick={() => setSelectedLayerId(layer.id)}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <span className="block truncate font-semibold">{layer.name}</span>
-                          <span className="text-xs text-slate-500">{layer.type === "image" ? "图片层" : "文字层"} · {layer.visible ? "显示" : "隐藏"} · {layer.locked ? "锁定" : "可编辑"}</span>
-                        </div>
-                        {layer.type === "image" && layerImageUrl && (
-                          <div className="group relative shrink-0">
-                            <img className="h-10 w-10 rounded-md object-cover" src={layerImageUrl} alt="" />
-                            <div className="pointer-events-none absolute bottom-full right-0 z-50 mb-1 hidden rounded-lg border border-line bg-white p-1 shadow-lg group-hover:block">
-                              <img className="max-h-40 max-w-40 rounded-md object-contain" src={layerImageUrl} alt="" />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              {selectedLayer && (
-                <LayerEditor
-                  layer={selectedLayer}
-                  pieces={pieces}
-                  onChange={(update) => patchLayer(selectedLayer.id, update)}
-                  onDelete={() => deleteLayer(selectedLayer.id)}
+              }
+            >
+              <div className="grid gap-3 text-sm">
+                <input
+                  ref={layerImageInputRef}
+                  className="hidden"
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void handleLayerUpload(file);
+                    event.currentTarget.value = "";
+                  }}
                 />
-              )}
-              <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || !designCanvas || autoRenderingDesign} onClick={() => regenerateDesignCanvas()}>
-                {autoRenderingDesign ? "正在更新预览" : "立即更新预览"}
-              </button>
-              {layersDirty && (
-                <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-                  图层已保存，系统会自动更新预览和导出画布；若未刷新，可点击立即更新。
-                </p>
-              )}
-              <SafetyReportList report={safetyReport} />
-            </div>
-          </Panel>
+                {designLayers.length === 0 && (
+                  <p className="m-0 text-xs leading-5 text-slate-500">
+                    先完成“自动适配面料”，生成全局设计画布后，可添加 logo、主图或号码文字。
+                  </p>
+                )}
+                <div className="grid gap-2">
+                  {designLayers.map((layer) => {
+                    const layerImageUrl = layer.source_url || (layer.asset_id ? assets.find((a) => a.id === layer.asset_id)?.url : "") || "";
+                    return (
+                      <button
+                        key={layer.id}
+                        className={`rounded-lg border px-3 py-2 text-left ${layer.id === selectedLayerId ? "border-jade bg-emerald-50" : "border-line bg-white"}`}
+                        onClick={() => setSelectedLayerId(layer.id)}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className="block truncate font-semibold">{layer.name}</span>
+                            <span className="text-xs text-slate-500">{layer.type === "image" ? "图片层" : "文字层"} · {layer.visible ? "显示" : "隐藏"} · {layer.locked ? "锁定" : "可编辑"}</span>
+                          </div>
+                          {layer.type === "image" && layerImageUrl && (
+                            <div className="group relative shrink-0">
+                              <img className="h-10 w-10 rounded-md object-cover" src={layerImageUrl} alt="" />
+                              <div className="pointer-events-none absolute bottom-full right-0 z-50 mb-1 hidden rounded-lg border border-line bg-white p-1 shadow-lg group-hover:block">
+                                <img className="max-h-40 max-w-40 rounded-md object-contain" src={layerImageUrl} alt="" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedLayer && (
+                  <LayerEditor
+                    layer={selectedLayer}
+                    pieces={pieces}
+                    onChange={(update) => patchLayer(selectedLayer.id, update)}
+                    onDelete={() => deleteLayer(selectedLayer.id)}
+                  />
+                )}
+                <button className="rounded-lg bg-jade px-3 py-2 font-semibold text-white disabled:opacity-50" disabled={!activeTexture || !designCanvas || autoRenderingDesign} onClick={() => regenerateDesignCanvas()}>
+                  {autoRenderingDesign ? "正在更新预览" : "立即更新预览"}
+                </button>
+                {layersDirty && (
+                  <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                    图层已保存，系统会自动更新预览和导出画布；若未刷新，可点击立即更新。
+                  </p>
+                )}
+                <SafetyReportList report={safetyReport} />
+              </div>
+            </Panel>
+          )}
         </aside>
 
         <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
