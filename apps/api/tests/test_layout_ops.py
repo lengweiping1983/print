@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from app.layout_ops import _apply_seam_alignment, _seam_phase, auto_map_pieces, build_design_canvas_config
+from app.layout_ops import _apply_seam_alignment, _seam_phase, auto_map_pieces, build_design_canvas_config, merge_mapping_into_transform
 
 
 def test_auto_map_rotates_inverted_back_piece(tmp_path: Path) -> None:
@@ -122,6 +122,75 @@ def test_auto_map_filters_seam_links_to_existing_roles(tmp_path: Path) -> None:
     roles = {item["piece_role"] for item in mapped}
     assert roles == {"front_left", "front_right"}
     assert all(link["to_role"] in roles for item in mapped for link in item["seam_links"])
+
+
+def test_safe_and_avoid_zone_defaults_match_legacy_ratios(tmp_path: Path) -> None:
+    pieces = [_rect_piece(tmp_path, "piece", 200, 100, 20000)]
+    canvas = build_design_canvas_config(pieces)
+
+    mapped = auto_map_pieces(pieces, canvas, "unknown")
+    safe = mapped[0]["safe_zones"][0]
+    avoid = mapped[0]["avoid_zones"][0]
+
+    assert safe == {"x": 32.0, "y": 14.000000000000002, "width": 136.0, "height": 72.0}
+    assert avoid["height"] == 8
+
+
+def test_safe_and_avoid_zones_follow_canvas_ratios(tmp_path: Path) -> None:
+    pieces = [_rect_piece(tmp_path, "piece", 200, 100, 20000)]
+    canvas = {
+        **build_design_canvas_config(pieces),
+        "safe_zone_inset_x_ratio": 0.1,
+        "safe_zone_inset_y_ratio": 0.2,
+        "avoid_zone_seam_ratio": 0.12,
+        "avoid_zone_min_px": 5,
+    }
+
+    mapped = auto_map_pieces(pieces, canvas, "unknown")
+    safe = mapped[0]["safe_zones"][0]
+    avoid = mapped[0]["avoid_zones"][0]
+
+    assert safe == {"x": 20.0, "y": 20.0, "width": 160.0, "height": 60.0}
+    assert avoid["height"] == 12.0
+    assert mapped[0]["avoid_zones"][2]["width"] == 12.0
+
+
+def test_merge_mapping_preserves_confirmed_position(tmp_path: Path) -> None:
+    pieces = [_rect_piece(tmp_path, "piece", 120, 160, 19200)]
+    canvas = build_design_canvas_config(pieces)
+    mapping = auto_map_pieces(pieces, canvas, "unknown")[0]
+
+    merged = merge_mapping_into_transform(
+        {
+            "design_x": 999,
+            "design_y": 888,
+            "offset_x": 7,
+            "offset_y": 9,
+            "position_confirmed": True,
+            "fit_note": "旧备注",
+        },
+        mapping,
+    )
+
+    assert merged["design_x"] == 999
+    assert merged["design_y"] == 888
+    assert merged["offset_x"] == 7
+    assert merged["offset_y"] == 9
+    assert merged["position_confirmed"] is True
+    assert merged["safe_zones"] == mapping["safe_zones"]
+    assert merged["fit_note"] == mapping["fit_note"]
+
+
+def test_merge_mapping_updates_unconfirmed_position(tmp_path: Path) -> None:
+    pieces = [_rect_piece(tmp_path, "piece", 120, 160, 19200)]
+    canvas = build_design_canvas_config(pieces)
+    mapping = auto_map_pieces(pieces, canvas, "unknown")[0]
+
+    merged = merge_mapping_into_transform({"design_x": 999, "design_y": 888}, mapping)
+
+    assert merged["design_x"] == mapping["design_region"]["x"]
+    assert merged["design_y"] == mapping["design_region"]["y"]
+    assert merged["position_confirmed"] is False
 
 
 def test_seam_phase_uses_edge_position_when_available() -> None:

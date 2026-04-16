@@ -51,6 +51,7 @@ class PieceTransform(BaseModel):
     grainline_angle: float = 0
     piece_role: str = ""
     role_confirmed: bool = False
+    position_confirmed: bool = False
     global_enabled: bool = True
     pair_id: str = ""
     pair_side: Literal["left", "right", "none", ""] = ""
@@ -268,4 +269,5 @@ class FabricPromptOut(BaseModel):
     name: str
     scenarios: str
     prompt: str
+    category: str
     sort_order: int

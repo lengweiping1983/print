@@ -49,7 +49,9 @@ def build_design_texture_canvas(
         logger.exception("加载纹理图片失败: %s", texture_path)
         raise RuntimeError(f"无法加载纹理图片 {texture_path}: {exc}") from exc
 
-    _draw_design_layers(canvas, design_canvas, asset_paths or {})
+    layer_warnings = _draw_design_layers(canvas, design_canvas, asset_paths or {})
+    if layer_warnings:
+        design_canvas["safety_report"] = [*(design_canvas.get("safety_report") or []), *layer_warnings]
     _draw_anchor_guides(canvas, design_canvas)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out_path)
@@ -107,27 +109,33 @@ def build_fit_preview(
     return render_layout(pieces, design_canvas_path, out_path, canvas_size)
 
 
-def _draw_design_layers(canvas: Image.Image, design_canvas: dict[str, Any], asset_paths: dict[str, Path]) -> None:
+def _draw_design_layers(canvas: Image.Image, design_canvas: dict[str, Any], asset_paths: dict[str, Path]) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
     for layer in design_canvas.get("layers", []):
         if not layer.get("visible", True):
             continue
         layer_type = layer.get("type")
         if layer_type == "image":
-            _draw_image_layer(canvas, layer, asset_paths)
+            warning = _draw_image_layer(canvas, layer, asset_paths)
+            if warning:
+                warnings.append(warning)
         elif layer_type == "text":
             _draw_text_layer(canvas, layer)
+    return warnings
 
 
-def _draw_image_layer(canvas: Image.Image, layer: dict[str, Any], asset_paths: dict[str, Path]) -> None:
+def _draw_image_layer(canvas: Image.Image, layer: dict[str, Any], asset_paths: dict[str, Path]) -> dict[str, Any] | None:
     asset_id = str(layer.get("asset_id") or "")
     source = asset_paths.get(asset_id)
     if not source or not source.exists():
-        return
+        logger.warning("图片图层素材缺失，渲染时已跳过: layer_id=%s asset_id=%s", layer.get("id", ""), asset_id)
+        return _report_item(layer, "warning", "图片图层素材缺失，渲染时已跳过。")
     width = max(1, int(float(layer.get("width") or 1)))
     height = max(1, int(float(layer.get("height") or 1)))
     with Image.open(source).convert("RGBA") as src:
         item = src.resize((width, height), Image.Resampling.LANCZOS)
         _paste_layer(canvas, item, layer)
+    return None
 
 
 def _draw_text_layer(canvas: Image.Image, layer: dict[str, Any]) -> None:

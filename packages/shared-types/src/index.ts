@@ -43,6 +43,7 @@ export type PieceTransform = {
   grainline_angle?: number;
   piece_role?: string;
   role_confirmed?: boolean;
+  position_confirmed?: boolean;
   global_enabled?: boolean;
   pair_id?: string;
   pair_side?: "left" | "right" | "none" | "";
@@ -143,6 +144,10 @@ export type DesignCanvas = {
   texture_repeat?: TextureRepeat;
   texture_content?: ContentCentroid;
   content_alignment?: ContentAlignment;
+  safe_zone_inset_x_ratio?: number;
+  safe_zone_inset_y_ratio?: number;
+  avoid_zone_seam_ratio?: number;
+  avoid_zone_min_px?: number;
 };
 
 export type GlobalFitOptions = {
@@ -294,5 +299,6 @@ export type FabricPrompt = {
   name: string;
   scenarios: string;
   prompt: string;
+  category: string;
   sort_order: number;
 };

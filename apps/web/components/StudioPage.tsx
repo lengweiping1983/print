@@ -201,7 +201,8 @@ export function StudioPage() {
   const aiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const layerImageInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [fabricPrompts, setFabricPrompts] = useState<FabricPrompt[]>([]);
+  const [texturePrompts, setTexturePrompts] = useState<FabricPrompt[]>([]);
+  const [layerPrompts, setLayerPrompts] = useState<FabricPrompt[]>([]);
   const [showPromptMenu, setShowPromptMenu] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [aiResolution, setAiResolution] = useState<"1K" | "2K" | "4K">("2K");
@@ -212,9 +213,14 @@ export function StudioPage() {
 
   useEffect(() => {
     let active = true;
-    api.listFabricPrompts().then((data) => {
-      if (active) setFabricPrompts(data);
-    }).catch(() => {});
+    Promise.all([
+      api.listFabricPrompts("面料").then((data) => {
+        if (active) setTexturePrompts(data);
+      }),
+      api.listFabricPrompts("logo").then((data) => {
+        if (active) setLayerPrompts(data);
+      }),
+    ]).catch(() => {});
     return () => {
       active = false;
     };
@@ -421,9 +427,9 @@ export function StudioPage() {
     if (!selectedPiece) return;
     const defaultTransform = pieceDefaults[selectedPiece.id];
     if (defaultTransform) {
-      void patchSelected({ ...defaultTransform, locked: selectedPiece.transform.locked });
+      void patchSelected({ ...defaultTransform, locked: selectedPiece.transform.locked, position_confirmed: false });
     } else {
-      void patchSelected({ ...emptyTransform, locked: selectedPiece.transform.locked });
+      void patchSelected({ ...emptyTransform, locked: selectedPiece.transform.locked, position_confirmed: false });
     }
   }
 
@@ -996,7 +1002,7 @@ export function StudioPage() {
               onOutlineWidthChange={setOutlineWidth}
               onMovePiece={(piece, x, y) => {
                 setSelectedPieceId(piece.id);
-                void patchPiece(piece.id, { offset_x: Math.round(x), offset_y: Math.round(y) });
+                void patchPiece(piece.id, { offset_x: Math.round(x), offset_y: Math.round(y), position_confirmed: true });
               }}
               onPatchTransform={patchSelected}
               onResetPiece={resetPieceToDefault}
@@ -1018,7 +1024,7 @@ export function StudioPage() {
           onSelectLayer={setSelectedLayerId}
           onMoveDesignRegion={(piece, update) => {
             setSelectedPieceId(piece.id);
-            void patchPiece(piece.id, update);
+            void patchPiece(piece.id, { ...update, position_confirmed: true });
           }}
           onMoveLayer={(layer, update) => {
             setSelectedLayerId(layer.id);
@@ -1089,16 +1095,17 @@ export function StudioPage() {
                   }
                 }}
                 onKeyDown={(event) => {
-                  if (!showPromptMenu || fabricPrompts.length === 0) return;
+                  const activePrompts = aiDialogMode === "texture" ? texturePrompts : layerPrompts;
+                  if (!showPromptMenu || activePrompts.length === 0) return;
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    setHighlightedIndex((i) => (i + 1) % fabricPrompts.length);
+                    setHighlightedIndex((i) => (i + 1) % activePrompts.length);
                   } else if (event.key === "ArrowUp") {
                     event.preventDefault();
-                    setHighlightedIndex((i) => (i - 1 + fabricPrompts.length) % fabricPrompts.length);
+                    setHighlightedIndex((i) => (i - 1 + activePrompts.length) % activePrompts.length);
                   } else if (event.key === "Enter") {
                     event.preventDefault();
-                    const selected = fabricPrompts[highlightedIndex];
+                    const selected = activePrompts[highlightedIndex];
                     if (selected) {
                       setPrompt(selected.prompt);
                       setShowPromptMenu(false);
@@ -1111,9 +1118,11 @@ export function StudioPage() {
                 placeholder="描述你想要生成的画面内容，按 / 呼出指令，@ 引用素材"
                 autoFocus
               />
-              {showPromptMenu && fabricPrompts.length > 0 && (
+              {(() => {
+                const activePrompts = aiDialogMode === "texture" ? texturePrompts : layerPrompts;
+                return showPromptMenu && activePrompts.length > 0 ? (
                 <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-line bg-white py-1 shadow-lg">
-                  {fabricPrompts.map((item, index) => (
+                  {activePrompts.map((item, index) => (
                     <button
                       key={item.id}
                       type="button"
@@ -1131,7 +1140,8 @@ export function StudioPage() {
                     </button>
                   ))}
                 </div>
-              )}
+                ) : null;
+              })()}
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-600">
               <span>Nano Banana Pro</span>

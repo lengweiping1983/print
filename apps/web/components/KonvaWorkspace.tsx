@@ -13,6 +13,10 @@ const loadedImageValueCache = new Map<string, HTMLImageElement | null>();
 const luminanceMaskCache = new Map<string, HTMLCanvasElement>();
 const luminanceMaskPromiseCache = new Map<string, Promise<HTMLCanvasElement | null>>();
 const MAX_CONCURRENT_IMAGE_LOADS = 4;
+const IMAGE_CACHE_LIMIT = 64;
+const MASK_CACHE_LIMIT = 48;
+const MAX_SAMPLE_CANVAS_EDGE = 1024;
+const MAX_SAMPLE_CANVAS_PIXELS = 1_048_576;
 let activeImageLoads = 0;
 const imageLoadQueue: Array<() => void> = [];
 let maskWorker: Worker | null = null;
@@ -32,15 +36,45 @@ type TextureSnapSettings = {
   periodY: number;
 };
 
+function rememberCacheValue<K, V>(cache: Map<K, V>, key: K, value: V, limit: number) {
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > limit) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
+function readCacheValue<K, V>(cache: Map<K, V>, key: K, limit: number) {
+  if (!cache.has(key)) return undefined;
+  const value = cache.get(key);
+  rememberCacheValue(cache, key, value as V, limit);
+  return value;
+}
+
+function limitedCanvasSize(width: number, height: number) {
+  const naturalWidth = Math.max(1, Math.round(width));
+  const naturalHeight = Math.max(1, Math.round(height));
+  const edgeScale = Math.min(1, MAX_SAMPLE_CANVAS_EDGE / Math.max(naturalWidth, naturalHeight));
+  const pixelScale = Math.min(1, Math.sqrt(MAX_SAMPLE_CANVAS_PIXELS / Math.max(1, naturalWidth * naturalHeight)));
+  const scale = Math.min(edgeScale, pixelScale);
+  return {
+    width: Math.max(1, Math.round(naturalWidth * scale)),
+    height: Math.max(1, Math.round(naturalHeight * scale)),
+    scale
+  };
+}
+
 function useLoadedImage(src: string, fallbackSrc = "") {
   const cacheKey = imageCacheKey(src, fallbackSrc);
-  const [image, setImage] = useState<HTMLImageElement | null>(() => loadedImageValueCache.get(cacheKey) ?? null);
+  const [image, setImage] = useState<HTMLImageElement | null>(() => readCacheValue(loadedImageValueCache, cacheKey, IMAGE_CACHE_LIMIT) ?? null);
   useEffect(() => {
     if (!src) {
       setImage(null);
       return;
     }
-    const cachedValue = loadedImageValueCache.get(cacheKey);
+    const cachedValue = readCacheValue(loadedImageValueCache, cacheKey, IMAGE_CACHE_LIMIT);
     if (cachedValue !== undefined) {
       setImage(cachedValue);
       return;
@@ -63,22 +97,22 @@ function imageCacheKey(src: string, fallbackSrc = "") {
 function loadCachedImage(src: string, fallbackSrc = "") {
   const cacheKey = imageCacheKey(src, fallbackSrc);
   if (loadedImageValueCache.has(cacheKey)) {
-    return Promise.resolve(loadedImageValueCache.get(cacheKey) ?? null);
+    return Promise.resolve(readCacheValue(loadedImageValueCache, cacheKey, IMAGE_CACHE_LIMIT) ?? null);
   }
-  const cached = loadedImageCache.get(cacheKey);
+  const cached = readCacheValue(loadedImageCache, cacheKey, IMAGE_CACHE_LIMIT);
   if (cached) return cached;
 
   const promise = loadImage(src).then((image) => {
     if (image || !fallbackSrc || fallbackSrc === src) {
-      loadedImageValueCache.set(cacheKey, image);
+      rememberCacheValue(loadedImageValueCache, cacheKey, image, IMAGE_CACHE_LIMIT);
       return image;
     }
     return loadImage(fallbackSrc).then((fallback) => {
-      loadedImageValueCache.set(cacheKey, fallback);
+      rememberCacheValue(loadedImageValueCache, cacheKey, fallback, IMAGE_CACHE_LIMIT);
       return fallback;
     });
   });
-  loadedImageCache.set(cacheKey, promise);
+  rememberCacheValue(loadedImageCache, cacheKey, promise, IMAGE_CACHE_LIMIT);
   return promise;
 }
 
@@ -135,7 +169,7 @@ function useElementSize<T extends HTMLElement>() {
 
 function useLuminanceMaskImage(image: HTMLImageElement | null, cacheKey = "") {
   const imageKey = cacheKey || image?.currentSrc || image?.src || "";
-  const [mask, setMask] = useState<HTMLCanvasElement | null>(() => (imageKey ? luminanceMaskCache.get(imageKey) ?? null : null));
+  const [mask, setMask] = useState<HTMLCanvasElement | null>(() => (imageKey ? readCacheValue(luminanceMaskCache, imageKey, MASK_CACHE_LIMIT) ?? null : null));
 
   useEffect(() => {
     if (!image) {
@@ -143,7 +177,7 @@ function useLuminanceMaskImage(image: HTMLImageElement | null, cacheKey = "") {
       return;
     }
     const key = cacheKey || image.currentSrc || image.src;
-    const cached = luminanceMaskCache.get(key);
+    const cached = readCacheValue(luminanceMaskCache, key, MASK_CACHE_LIMIT);
     if (cached) {
       setMask(cached);
       return;
@@ -161,24 +195,24 @@ function useLuminanceMaskImage(image: HTMLImageElement | null, cacheKey = "") {
 }
 
 function getLuminanceMaskCanvas(image: HTMLImageElement, key: string) {
-  const cached = luminanceMaskCache.get(key);
+  const cached = readCacheValue(luminanceMaskCache, key, MASK_CACHE_LIMIT);
   if (cached) return Promise.resolve(cached);
-  const pending = luminanceMaskPromiseCache.get(key);
+  const pending = readCacheValue(luminanceMaskPromiseCache, key, MASK_CACHE_LIMIT);
   if (pending) return pending;
 
   const promise = createLuminanceMaskCanvas(image)
     .then((canvas) => {
-      if (canvas) luminanceMaskCache.set(key, canvas);
+      if (canvas) rememberCacheValue(luminanceMaskCache, key, canvas, MASK_CACHE_LIMIT);
       luminanceMaskPromiseCache.delete(key);
       return canvas;
     })
     .catch(() => {
       luminanceMaskPromiseCache.delete(key);
       const fallback = createLuminanceMaskCanvasSync(image);
-      if (fallback) luminanceMaskCache.set(key, fallback);
+      if (fallback) rememberCacheValue(luminanceMaskCache, key, fallback, MASK_CACHE_LIMIT);
       return fallback;
     });
-  luminanceMaskPromiseCache.set(key, promise);
+  rememberCacheValue(luminanceMaskPromiseCache, key, promise, MASK_CACHE_LIMIT);
   return promise;
 }
 
@@ -1754,11 +1788,13 @@ function useTiledTextureSample(
     if (sourceWidth <= 0 || sourceHeight <= 0) return null;
     const width = Math.max(1, Math.round(crop.width));
     const height = Math.max(1, Math.round(crop.height));
+    const limited = limitedCanvasSize(width, height);
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = limited.width;
+    canvas.height = limited.height;
     const context = canvas.getContext("2d");
     if (!context) return null;
+    context.scale(limited.scale, limited.scale);
     const offsetX = wrapCropCoordinate(crop.x, sourceWidth);
     const offsetY = wrapCropCoordinate(crop.y, sourceHeight);
     for (let y = -offsetY; y < height; y += sourceHeight) {
@@ -1790,9 +1826,10 @@ function useGlobalCanvasSample(textureImage: HTMLImageElement, options: GlobalCa
     if (sourceWidth <= 0 || sourceHeight <= 0) return null;
 
     const view = options.view;
+    const outputSize = limitedCanvasSize(view.pixelWidth, view.pixelHeight);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(view.pixelWidth));
-    canvas.height = Math.max(1, Math.round(view.pixelHeight));
+    canvas.width = outputSize.width;
+    canvas.height = outputSize.height;
     const context = canvas.getContext("2d");
     if (!context) return null;
 
@@ -1844,7 +1881,7 @@ function useGlobalCanvasSample(textureImage: HTMLImageElement, options: GlobalCa
     context.rotate(angle);
     context.scale(scale, scale);
     context.translate(cropX - options.originX - centerX, cropY - options.originY - centerY);
-    context.drawImage(crop, 0, 0);
+    context.drawImage(crop.canvas, 0, 0, crop.width, crop.height);
     return canvas;
   }, [
     textureImage,
@@ -1874,11 +1911,13 @@ function createTiledTextureSample(
   if (sourceWidth <= 0 || sourceHeight <= 0) return null;
   const width = Math.max(1, Math.round(crop.width));
   const height = Math.max(1, Math.round(crop.height));
+  const limited = limitedCanvasSize(width, height);
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = limited.width;
+  canvas.height = limited.height;
   const context = canvas.getContext("2d");
   if (!context) return null;
+  context.scale(limited.scale, limited.scale);
   const offsetX = wrapCropCoordinate(crop.x, sourceWidth);
   const offsetY = wrapCropCoordinate(crop.y, sourceHeight);
   for (let y = -offsetY; y < height; y += sourceHeight) {
@@ -1886,7 +1925,7 @@ function createTiledTextureSample(
       context.drawImage(textureImage, x, y, sourceWidth, sourceHeight);
     }
   }
-  return canvas;
+  return { canvas, width, height };
 }
 
 function LayoutPieceTexture({

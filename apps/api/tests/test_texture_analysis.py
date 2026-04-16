@@ -123,6 +123,20 @@ def test_detect_content_centroid_finds_opaque_foreground(tmp_path: Path) -> None
     assert abs(content["centroid"]["y"] - 40) <= 2
 
 
+def test_detect_content_centroid_finds_low_contrast_foreground(tmp_path: Path) -> None:
+    path = tmp_path / "low_contrast_foreground.png"
+    image = Image.new("RGB", (100, 80), (245, 245, 245))
+    ImageDraw.Draw(image).ellipse((30, 20, 70, 60), fill=(215, 215, 215))
+    image.save(path)
+
+    content = detect_content_centroid(path)
+
+    assert content["has_content"] is True
+    assert content["method"] == "foreground_centroid_v1"
+    assert abs(content["centroid"]["x"] - 50) <= 2
+    assert abs(content["centroid"]["y"] - 40) <= 2
+
+
 def test_edge_average_rgb_samples_unique_single_row_edges() -> None:
     image = Image.new("RGB", (3, 1), (0, 0, 0))
     image.putpixel((0, 0), (30, 0, 0))

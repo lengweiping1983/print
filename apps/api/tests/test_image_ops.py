@@ -166,6 +166,43 @@ def test_build_design_texture_canvas_tiling_keeps_offset_pixels(tmp_path: Path) 
         assert rendered.getpixel(point) == tile.getpixel((expected_x, expected_y))
 
 
+def test_build_design_texture_canvas_reports_missing_image_layer(tmp_path: Path) -> None:
+    texture = tmp_path / "tile.png"
+    Image.new("RGBA", (4, 4), (20, 80, 160, 255)).save(texture)
+    out = tmp_path / "design.png"
+    design_canvas = {
+        "width": 32,
+        "height": 32,
+        "texture_scale": 1,
+        "texture_offset_x": 0,
+        "texture_offset_y": 0,
+        "tile": True,
+        "mirror": False,
+        "global_texture_angle": 0,
+        "design_anchors": {},
+        "layers": [
+            {
+                "id": "layer_missing",
+                "type": "image",
+                "name": "缺失图片",
+                "asset_id": "asset_missing",
+                "visible": True,
+                "x": 4,
+                "y": 4,
+                "width": 12,
+                "height": 12,
+            }
+        ],
+        "safety_report": [],
+    }
+
+    build_design_texture_canvas(texture, out, design_canvas, {})
+
+    assert out.exists()
+    assert design_canvas["safety_report"][0]["level"] == "warning"
+    assert design_canvas["safety_report"][0]["message"] == "图片图层素材缺失，渲染时已跳过。"
+
+
 def test_render_piece_tiling_keeps_local_offset_pixels(tmp_path: Path) -> None:
     mask = tmp_path / "piece_mask.png"
     Image.new("L", (20, 16), 255).save(mask)

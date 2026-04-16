@@ -10,6 +10,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+try:
+    import numpy as np
+except Exception:  # pragma: no cover - numpy 缺失时走纯 Python 回退
+    np = None
+
 
 SOURCE_KEYWORDS = {
     "logo",
@@ -147,16 +152,11 @@ def detect_content_centroid(image_path: Path, *, image_stats: dict[str, float] |
 
         rgb = img.convert("RGB")
         stat = ImageStat.Stat(rgb)
-        if sum(stat.stddev[:3]) / 3 < 8:
+        channel_std = sum(stat.stddev[:3]) / 3
+        if channel_std < 8:
             return result
         bg = _edge_average_rgb(rgb)
-        pixels = rgb.tobytes()
-        mask = []
-        for index in range(0, len(pixels), 3):
-            dr = int(pixels[index]) - bg[0]
-            dg = int(pixels[index + 1]) - bg[1]
-            db = int(pixels[index + 2]) - bg[2]
-            mask.append(math.sqrt(dr * dr + dg * dg + db * db) > 55)
+        mask = _foreground_mask(rgb, bg, _foreground_threshold(channel_std))
         return _content_result_from_mask(mask, width, height, "foreground_centroid_v1", max_coverage=0.65)
 
 
@@ -296,6 +296,9 @@ def _normalized_diff(a: Image.Image, b: Image.Image) -> float:
 
 def _axis_projection(image: Image.Image, axis: str) -> list[float]:
     width, height = image.size
+    if np is not None:
+        arr = np.asarray(image, dtype=np.float32)
+        return arr.mean(axis=0 if axis == "x" else 1).tolist()
     pixels = list(image.tobytes())
     if axis == "x":
         return [sum(pixels[y * width + x] for y in range(height)) / height for x in range(width)]
@@ -303,6 +306,26 @@ def _axis_projection(image: Image.Image, axis: str) -> list[float]:
 
 
 def _detect_axis_period(values: Any) -> tuple[int, float]:
+    if np is not None:
+        series_np = np.asarray(values, dtype=np.float64)
+        if series_np.size < 12:
+            return 0, 0.0
+        series_np = series_np - float(series_np.mean())
+        variance = float(np.dot(series_np, series_np))
+        if variance <= 1e-6:
+            return 0, 0.0
+        min_period = 4
+        max_period = min(int(series_np.size) // 2, 256)
+        if max_period < min_period:
+            return 0, 0.0
+        scores = []
+        for shift in range(1, max_period + 1):
+            left = series_np[:-shift]
+            right = series_np[shift:]
+            denom = math.sqrt(float(np.dot(left, left))) * math.sqrt(float(np.dot(right, right)))
+            scores.append(float(np.dot(left, right)) / denom if denom > 1e-6 else 0.0)
+        return _best_period_from_scores(scores, min_period)
+
     series = [float(value) for value in values]
     if len(series) < 12:
         return 0, 0.0
@@ -326,6 +349,10 @@ def _detect_axis_period(values: Any) -> tuple[int, float]:
         denom = left_norm * right_norm
         scores.append(sum(a * b for a, b in zip(left, right)) / denom if denom > 1e-6 else 0.0)
 
+    return _best_period_from_scores(scores, min_period)
+
+
+def _best_period_from_scores(scores: list[float], min_period: int) -> tuple[int, float]:
     best_period = 0
     best_score = 0.0
     for index in range(min_period - 1, len(scores)):
@@ -347,8 +374,28 @@ def _detect_axis_period(values: Any) -> tuple[int, float]:
     return best_period, max(0.0, min(1.0, best_score))
 
 
+def _foreground_threshold(channel_std: float) -> float:
+    return max(30.0, min(80.0, channel_std * 2.5 + 20.0))
+
+
+def _foreground_mask(image: Image.Image, bg: tuple[float, float, float], threshold: float) -> Any:
+    if np is not None:
+        arr = np.asarray(image, dtype=np.float32)
+        bg_arr = np.asarray(bg, dtype=np.float32)
+        return np.linalg.norm(arr - bg_arr, axis=2) > threshold
+
+    pixels = image.tobytes()
+    mask = []
+    for index in range(0, len(pixels), 3):
+        dr = int(pixels[index]) - bg[0]
+        dg = int(pixels[index + 1]) - bg[1]
+        db = int(pixels[index + 2]) - bg[2]
+        mask.append(math.sqrt(dr * dr + dg * dg + db * db) > threshold)
+    return mask
+
+
 def _content_result_from_mask(
-    mask: list[bool],
+    mask: Any,
     width: int,
     height: int,
     method: str,
@@ -356,7 +403,12 @@ def _content_result_from_mask(
     max_coverage: float,
 ) -> dict[str, Any]:
     total = max(1, width * height)
-    count = sum(1 for value in mask if value)
+    if np is not None:
+        mask_arr = np.asarray(mask, dtype=bool).reshape((height, width))
+        count = int(mask_arr.sum())
+    else:
+        mask_arr = None
+        count = sum(1 for value in mask if value)
     opaque_ratio = count / total
     result = {
         "has_content": False,
@@ -370,23 +422,32 @@ def _content_result_from_mask(
     if count == 0 or opaque_ratio < 0.002 or opaque_ratio > max_coverage:
         return result
 
-    min_x = width
-    min_y = height
-    max_x = 0
-    max_y = 0
-    sum_x = 0
-    sum_y = 0
-    for index, value in enumerate(mask):
-        if not value:
-            continue
-        x = index % width
-        y = index // width
-        min_x = min(min_x, x)
-        min_y = min(min_y, y)
-        max_x = max(max_x, x)
-        max_y = max(max_y, y)
-        sum_x += x
-        sum_y += y
+    if mask_arr is not None:
+        ys, xs = np.nonzero(mask_arr)
+        min_x = int(xs.min())
+        min_y = int(ys.min())
+        max_x = int(xs.max())
+        max_y = int(ys.max())
+        sum_x = float(xs.sum())
+        sum_y = float(ys.sum())
+    else:
+        min_x = width
+        min_y = height
+        max_x = 0
+        max_y = 0
+        sum_x = 0.0
+        sum_y = 0.0
+        for index, value in enumerate(mask):
+            if not value:
+                continue
+            x = index % width
+            y = index // width
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x)
+            max_y = max(max_y, y)
+            sum_x += x
+            sum_y += y
 
     bbox_w = max_x - min_x + 1
     bbox_h = max_y - min_y + 1

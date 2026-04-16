@@ -1042,6 +1042,7 @@ def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dic
                     transform["grainline_angle"] = base_t.get("grainline_angle", 0)
                     transform["piece_role"] = base_t.get("piece_role", "")
                     transform["role_confirmed"] = base_t.get("role_confirmed", False)
+                    transform["position_confirmed"] = base_t.get("position_confirmed", False)
                     transform["global_enabled"] = base_t.get("global_enabled", True)
                     transform["safe_zones"] = base_t.get("safe_zones", [])
                     transform["avoid_zones"] = base_t.get("avoid_zones", [])
@@ -1090,6 +1091,7 @@ def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dic
             linked_transform["mode"] = source_transform.get("mode", current_transform.get("mode", "global_canvas"))
             linked_transform["piece_role"] = current_transform.get("piece_role", "")
             linked_transform["role_confirmed"] = current_transform.get("role_confirmed", False)
+            linked_transform["position_confirmed"] = current_transform.get("position_confirmed", False)
             linked_transform["fit_confidence"] = current_transform.get("fit_confidence", 0)
             linked_transform["fit_note"] = "内容由关联裁片派生，不参与全局定位。"
             linked_transform["global_enabled"] = False
@@ -1118,9 +1120,15 @@ def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dic
 
 
 @app.get("/api/fabric-prompts", response_model=list[FabricPromptOut])
-def list_fabric_prompts() -> list[dict]:
+def list_fabric_prompts(category: str = "") -> list[dict]:
     with connect() as con:
-        rows = con.execute("select id, code, name, scenarios, prompt, sort_order from fabric_prompts order by sort_order").fetchall()
+        if category:
+            rows = con.execute(
+                "select id, code, name, scenarios, prompt, category, sort_order from fabric_prompts where category = ? order by sort_order",
+                (category,),
+            ).fetchall()
+        else:
+            rows = con.execute("select id, code, name, scenarios, prompt, category, sort_order from fabric_prompts order by sort_order").fetchall()
     return [row_to_dict(row) for row in rows]
 
 

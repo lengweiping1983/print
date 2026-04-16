@@ -202,8 +202,9 @@ export const api = {
       body: JSON.stringify({ set_id: setId, size_name: sizeName, copy_design_from_base: copyDesignFromBase }),
     });
   },
-  listFabricPrompts() {
-    return request<FabricPrompt[]>("/api/fabric-prompts");
+  listFabricPrompts(category?: string) {
+    const query = category ? `?category=${encodeURIComponent(category)}` : "";
+    return request<FabricPrompt[]>(`/api/fabric-prompts${query}`);
   },
 };
 

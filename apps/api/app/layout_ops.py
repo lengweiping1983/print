@@ -150,8 +150,8 @@ def auto_map_pieces(
                     "mirror_y": False,
                 },
                 "seam_links": _default_seam_links(role),
-                "safe_zones": _default_safe_zones(box),
-                "avoid_zones": _default_avoid_zones(box),
+                "safe_zones": _default_safe_zones(box, design_canvas),
+                "avoid_zones": _default_avoid_zones(box, design_canvas),
                 "fit_confidence": confidence,
                 "fit_note": note,
             }
@@ -166,28 +166,30 @@ def merge_mapping_into_transform(transform: dict[str, Any], mapping: dict[str, A
     region = mapping["design_region"]
     next_transform = dict(transform or {})
     role_confirmed = bool(next_transform.get("role_confirmed", False))
+    position_confirmed = bool(next_transform.get("position_confirmed", False))
     piece_role = next_transform.get("piece_role") if role_confirmed else mapping["piece_role"]
-    next_transform.update(
-        {
-            "mode": "global_canvas",
-            "design_x": region["x"],
-            "design_y": region["y"],
-            "design_width": region["width"],
-            "design_height": region["height"],
-            "design_rotation": region["rotation"],
-            "rotation": region["rotation"],
-            "mirror_x": bool(region["mirror_x"]),
-            "mirror_y": bool(region["mirror_y"]),
-            "grainline_angle": mapping["grainline_angle"],
-            "piece_role": piece_role or mapping["piece_role"],
-            "role_confirmed": role_confirmed,
-            "global_enabled": bool(next_transform.get("global_enabled", True)),
-            "safe_zones": mapping.get("safe_zones", []),
-            "avoid_zones": mapping.get("avoid_zones", []),
-            "fit_confidence": mapping["fit_confidence"],
-            "fit_note": mapping["fit_note"],
-        }
-    )
+    update = {
+        "mode": "global_canvas",
+        "design_width": region["width"],
+        "design_height": region["height"],
+        "design_rotation": region["rotation"],
+        "rotation": region["rotation"],
+        "mirror_x": bool(region["mirror_x"]),
+        "mirror_y": bool(region["mirror_y"]),
+        "grainline_angle": mapping["grainline_angle"],
+        "piece_role": piece_role or mapping["piece_role"],
+        "role_confirmed": role_confirmed,
+        "position_confirmed": position_confirmed,
+        "global_enabled": bool(next_transform.get("global_enabled", True)),
+        "safe_zones": mapping.get("safe_zones", []),
+        "avoid_zones": mapping.get("avoid_zones", []),
+        "fit_confidence": mapping["fit_confidence"],
+        "fit_note": mapping["fit_note"],
+    }
+    if not position_confirmed:
+        update["design_x"] = region["x"]
+        update["design_y"] = region["y"]
+    next_transform.update(update)
     return next_transform
 
 
@@ -459,20 +461,40 @@ def _filter_seam_links(mapped: list[dict[str, Any]]) -> None:
         ]
 
 
-def _default_safe_zones(box: PieceBox) -> list[dict[str, float]]:
-    inset_x = box.width * 0.16
-    inset_y = box.height * 0.14
+def _default_safe_zones(box: PieceBox, design_canvas: dict[str, Any] | None = None) -> list[dict[str, float]]:
+    inset_x_ratio = _ratio_setting(design_canvas, "safe_zone_inset_x_ratio", 0.16)
+    inset_y_ratio = _ratio_setting(design_canvas, "safe_zone_inset_y_ratio", 0.14)
+    inset_x = box.width * inset_x_ratio
+    inset_y = box.height * inset_y_ratio
     return [{"x": inset_x, "y": inset_y, "width": max(1, box.width - inset_x * 2), "height": max(1, box.height - inset_y * 2)}]
 
 
-def _default_avoid_zones(box: PieceBox) -> list[dict[str, float]]:
-    seam = max(8, min(box.width, box.height) * 0.06)
+def _default_avoid_zones(box: PieceBox, design_canvas: dict[str, Any] | None = None) -> list[dict[str, float]]:
+    seam_ratio = _ratio_setting(design_canvas, "avoid_zone_seam_ratio", 0.06)
+    min_px = _positive_float_setting(design_canvas, "avoid_zone_min_px", 8)
+    seam = max(min_px, min(box.width, box.height) * seam_ratio)
     return [
         {"x": 0, "y": 0, "width": box.width, "height": seam},
         {"x": 0, "y": box.height - seam, "width": box.width, "height": seam},
         {"x": 0, "y": 0, "width": seam, "height": box.height},
         {"x": box.width - seam, "y": 0, "width": seam, "height": box.height},
     ]
+
+
+def _ratio_setting(design_canvas: dict[str, Any] | None, key: str, default: float) -> float:
+    try:
+        value = float((design_canvas or {}).get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(0.45, value))
+
+
+def _positive_float_setting(design_canvas: dict[str, Any] | None, key: str, default: float) -> float:
+    try:
+        value = float((design_canvas or {}).get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, value)
 
 
 # ---------------------------------------------------------------------------
