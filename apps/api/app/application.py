@@ -283,6 +283,14 @@ def list_pieces(project_id: str) -> list[dict]:
 def update_piece(project_id: str, piece_id: str, payload: PieceTransform) -> dict:
     ensure_project(project_id)
     with connect() as con:
+        current = con.execute(
+            "select mirror_of from pieces where id = ? and project_id = ?",
+            (piece_id, project_id),
+        ).fetchone()
+        if not current:
+            raise HTTPException(status_code=404, detail="Piece not found")
+        if current["mirror_of"]:
+            return get_piece_dict(piece_id, project_id)
         cur = con.execute(
             "update pieces set transform = ?, updated_at = ? where id = ? and project_id = ?",
             (dumps(payload.model_dump()), now_iso(), piece_id, project_id),

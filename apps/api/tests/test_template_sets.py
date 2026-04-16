@@ -231,6 +231,12 @@ def test_template_set_linked_piece_creates_project_mirror_relation(mirror_x: boo
         assert linked_piece["transform"]["mirror_y"] is mirror_y
         assert linked_piece["transform"]["global_enabled"] is False
         assert "design_x" not in linked_piece["transform"] or linked_piece["transform"]["design_x"] == 0
+        patched_linked = client.patch(
+            f"/api/projects/{project['id']}/pieces/{linked_piece['id']}",
+            json={**linked_piece["transform"], "offset_x": 999, "design_x": 999},
+        ).json()
+        assert patched_linked["transform"]["offset_x"] == linked_piece["transform"]["offset_x"]
+        assert patched_linked["transform"]["design_x"] == linked_piece["transform"]["design_x"]
 
 
 def test_global_fit_mappings_exclude_linked_pieces() -> None:

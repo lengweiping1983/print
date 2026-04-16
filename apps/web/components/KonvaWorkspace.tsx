@@ -682,6 +682,7 @@ export function LayoutPreview({
                 <LayoutPieceTexture
                   key={`texture-${piece.id}`}
                   piece={piece}
+                  sourcePiece={piece.mirror_of ? pieces.find((item) => item.id === piece.mirror_of) : undefined}
                   textureImage={textureImage}
                   selected={piece.id === selectedPieceId}
                   zoom={layoutZoom}
@@ -1170,6 +1171,9 @@ function DimmedTextureLayer({
 
 function ClippedTextureLayer({
   piece,
+  contentPiece,
+  contentMirrorX = false,
+  contentMirrorY = false,
   textureImage,
   maskImage,
   frame,
@@ -1180,6 +1184,9 @@ function ClippedTextureLayer({
   onSelect
 }: {
   piece: Piece;
+  contentPiece?: Piece;
+  contentMirrorX?: boolean;
+  contentMirrorY?: boolean;
   textureImage: HTMLImageElement;
   maskImage: CanvasImageSource;
   frame: { x: number; y: number; width: number; height: number };
@@ -1189,35 +1196,38 @@ function ClippedTextureLayer({
   onMove?: (x: number, y: number) => void;
   onSelect?: () => void;
 }) {
-  const frameScale = frame.width / Math.max(1, piece.width);
-  const globalMode = piece.transform.mode === "global_canvas";
-  const designX = (piece.transform.design_x ?? 0) + piece.transform.offset_x;
-  const designY = (piece.transform.design_y ?? 0) + piece.transform.offset_y;
+  const renderPiece = contentPiece || piece;
+  const frameScale = frame.width / Math.max(1, renderPiece.width);
+  const globalMode = renderPiece.transform.mode === "global_canvas";
+  const effectiveMirrorX = Boolean(renderPiece.transform.mirror_x) !== contentMirrorX;
+  const effectiveMirrorY = Boolean(renderPiece.transform.mirror_y) !== contentMirrorY;
+  const designX = (renderPiece.transform.design_x ?? 0) + renderPiece.transform.offset_x;
+  const designY = (renderPiece.transform.design_y ?? 0) + renderPiece.transform.offset_y;
   const globalSample = useGlobalCanvasSample(textureImage, {
     originX: designX,
     originY: designY,
-    pieceWidth: piece.width,
-    pieceHeight: piece.height,
+    pieceWidth: renderPiece.width,
+    pieceHeight: renderPiece.height,
     view: globalMode
       ? {
           x: 0,
           y: 0,
-          width: piece.width,
-          height: piece.height,
+          width: renderPiece.width,
+          height: renderPiece.height,
           pixelWidth: Math.max(1, Math.round(frame.width)),
           pixelHeight: Math.max(1, Math.round(frame.height))
         }
       : null,
-    scale: piece.transform.scale,
-    rotation: piece.transform.rotation,
-    mirrorX: piece.transform.mirror_x,
-    mirrorY: piece.transform.mirror_y
+    scale: renderPiece.transform.scale,
+    rotation: renderPiece.transform.rotation,
+    mirrorX: effectiveMirrorX,
+    mirrorY: effectiveMirrorY
   });
   const renderedImage = globalMode ? globalSample || textureImage : textureImage;
-  const imageWidth = globalMode ? frame.width : Math.max(1, textureImage.naturalWidth * piece.transform.scale * frameScale);
-  const imageHeight = globalMode ? frame.height : Math.max(1, textureImage.naturalHeight * piece.transform.scale * frameScale);
-  const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : piece.transform.offset_x * frameScale);
-  const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : piece.transform.offset_y * frameScale);
+  const imageWidth = globalMode ? frame.width : Math.max(1, textureImage.naturalWidth * renderPiece.transform.scale * frameScale);
+  const imageHeight = globalMode ? frame.height : Math.max(1, textureImage.naturalHeight * renderPiece.transform.scale * frameScale);
+  const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : renderPiece.transform.offset_x * frameScale);
+  const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : renderPiece.transform.offset_y * frameScale);
 
   return (
     <Layer scaleX={zoom} scaleY={zoom}>
@@ -1229,9 +1239,9 @@ function ClippedTextureLayer({
         height={imageHeight}
         offsetX={imageWidth / 2}
         offsetY={imageHeight / 2}
-        rotation={globalMode ? 0 : piece.transform.rotation}
-        scaleX={!globalMode && piece.transform.mirror_x ? -1 : 1}
-        scaleY={!globalMode && piece.transform.mirror_y ? -1 : 1}
+        rotation={globalMode ? 0 : renderPiece.transform.rotation}
+        scaleX={!globalMode && effectiveMirrorX ? -1 : 1}
+        scaleY={!globalMode && effectiveMirrorY ? -1 : 1}
         opacity={opacity}
         draggable={draggable && !piece.transform.locked}
         onClick={onSelect}
@@ -1419,12 +1429,14 @@ function createTiledTextureSample(
 
 function LayoutPieceTexture({
   piece,
+  sourcePiece,
   textureImage,
   selected,
   zoom,
   onSelect
 }: {
   piece: Piece;
+  sourcePiece?: Piece;
   textureImage: HTMLImageElement;
   selected: boolean;
   zoom: number;
@@ -1437,6 +1449,9 @@ function LayoutPieceTexture({
   return (
     <ClippedTextureLayer
       piece={piece}
+      contentPiece={sourcePiece}
+      contentMirrorX={Boolean(piece.mirror_of && piece.transform.mirror_x)}
+      contentMirrorY={Boolean(piece.mirror_of && piece.transform.mirror_y)}
       textureImage={textureImage}
       maskImage={alphaMask}
       frame={{ x: piece.source_x, y: piece.source_y, width: piece.width, height: piece.height }}
