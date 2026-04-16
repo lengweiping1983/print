@@ -204,8 +204,8 @@ def _layer_rect(layer: dict[str, Any]) -> dict[str, float]:
 def _piece_design_rect(piece: dict[str, Any]) -> dict[str, float]:
     transform = piece.get("transform", {})
     return {
-        "x": float(transform.get("design_x", piece.get("source_x", 0)) or 0),
-        "y": float(transform.get("design_y", piece.get("source_y", 0)) or 0),
+        "x": float(transform.get("design_x", piece.get("source_x", 0)) or 0) + float(transform.get("offset_x", 0) or 0),
+        "y": float(transform.get("design_y", piece.get("source_y", 0)) or 0) + float(transform.get("offset_y", 0) or 0),
         "width": max(1, float(transform.get("design_width", piece.get("width", 1)) or 1)),
         "height": max(1, float(transform.get("design_height", piece.get("height", 1)) or 1)),
     }

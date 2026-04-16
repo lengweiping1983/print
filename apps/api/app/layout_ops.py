@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
+
+from .config import MAX_IMAGE_PIXELS
 
 
 ROLE_LABELS = {
@@ -46,6 +49,7 @@ def build_design_canvas_config(
     estimated_side = int(max(total_area, 1) ** 0.5)
     width = int(payload.get("canvas_width") or max(1600, max_piece_w * 3, estimated_side * 2.2))
     height = int(payload.get("canvas_height") or max(1200, max_piece_h * 3, estimated_side * 2.2))
+    width, height = _limit_canvas_pixels(width, height)
     margin = max(80, min(width, height) // 24)
     return {
         "width": width,
@@ -73,6 +77,16 @@ def build_design_canvas_config(
         "safety_report": payload.get("safety_report") or [],
         "size_mapping": {},
     }
+
+
+def _limit_canvas_pixels(width: int, height: int) -> tuple[int, int]:
+    width = max(1, int(width))
+    height = max(1, int(height))
+    pixels = width * height
+    if pixels <= MAX_IMAGE_PIXELS:
+        return width, height
+    scale = math.sqrt(MAX_IMAGE_PIXELS / pixels)
+    return max(1, int(width * scale)), max(1, int(height * scale))
 
 
 def auto_map_pieces(

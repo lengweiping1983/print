@@ -11,6 +11,19 @@ import { Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva/es/Re
 const loadedImageCache = new Map<string, Promise<HTMLImageElement | null>>();
 const loadedImageValueCache = new Map<string, HTMLImageElement | null>();
 const luminanceMaskCache = new Map<string, HTMLCanvasElement>();
+const luminanceMaskPromiseCache = new Map<string, Promise<HTMLCanvasElement | null>>();
+const MAX_CONCURRENT_IMAGE_LOADS = 4;
+let activeImageLoads = 0;
+const imageLoadQueue: Array<() => void> = [];
+let maskWorker: Worker | null = null;
+let maskWorkerRequestId = 0;
+const maskWorkerRequests = new Map<
+  number,
+  {
+    resolve: (canvas: HTMLCanvasElement | null) => void;
+    reject: (error: Error) => void;
+  }
+>();
 
 function useLoadedImage(src: string, fallbackSrc = "") {
   const cacheKey = imageCacheKey(src, fallbackSrc);
@@ -64,12 +77,35 @@ function loadCachedImage(src: string, fallbackSrc = "") {
 
 function loadImage(src: string) {
   return new Promise<HTMLImageElement | null>((resolve) => {
-    const img = new window.Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = src;
+    imageLoadQueue.push(() => {
+      const img = new window.Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        finishQueuedImageLoad();
+        resolve(img);
+      };
+      img.onerror = () => {
+        finishQueuedImageLoad();
+        resolve(null);
+      };
+      img.src = src;
+    });
+    pumpImageLoadQueue();
   });
+}
+
+function pumpImageLoadQueue() {
+  while (activeImageLoads < MAX_CONCURRENT_IMAGE_LOADS) {
+    const next = imageLoadQueue.shift();
+    if (!next) return;
+    activeImageLoads += 1;
+    next();
+  }
+}
+
+function finishQueuedImageLoad() {
+  activeImageLoads = Math.max(0, activeImageLoads - 1);
+  pumpImageLoadQueue();
 }
 
 function useElementSize<T extends HTMLElement>() {
@@ -105,34 +141,122 @@ function useLuminanceMaskImage(image: HTMLImageElement | null, cacheKey = "") {
       setMask(cached);
       return;
     }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth || image.width;
-    canvas.height = image.naturalHeight || image.height;
-    const context = canvas.getContext("2d");
-    if (!context) {
-      setMask(null);
-      return;
-    }
-
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const { data } = imageData;
-    for (let index = 0; index < data.length; index += 4) {
-      const sourceAlpha = data[index + 3];
-      const luminanceAlpha = Math.max(data[index], data[index + 1], data[index + 2]);
-      const alpha = sourceAlpha < 255 ? sourceAlpha : luminanceAlpha;
-      data[index] = 255;
-      data[index + 1] = 255;
-      data[index + 2] = 255;
-      data[index + 3] = alpha;
-    }
-    context.putImageData(imageData, 0, 0);
-    luminanceMaskCache.set(key, canvas);
-    setMask(canvas);
+    let active = true;
+    getLuminanceMaskCanvas(image, key).then((canvas) => {
+      if (active) setMask(canvas);
+    });
+    return () => {
+      active = false;
+    };
   }, [image, cacheKey]);
 
   return mask;
+}
+
+function getLuminanceMaskCanvas(image: HTMLImageElement, key: string) {
+  const cached = luminanceMaskCache.get(key);
+  if (cached) return Promise.resolve(cached);
+  const pending = luminanceMaskPromiseCache.get(key);
+  if (pending) return pending;
+
+  const promise = createLuminanceMaskCanvas(image)
+    .then((canvas) => {
+      if (canvas) luminanceMaskCache.set(key, canvas);
+      luminanceMaskPromiseCache.delete(key);
+      return canvas;
+    })
+    .catch(() => {
+      luminanceMaskPromiseCache.delete(key);
+      const fallback = createLuminanceMaskCanvasSync(image);
+      if (fallback) luminanceMaskCache.set(key, fallback);
+      return fallback;
+    });
+  luminanceMaskPromiseCache.set(key, promise);
+  return promise;
+}
+
+async function createLuminanceMaskCanvas(image: HTMLImageElement) {
+  if (!("Worker" in window) || !("createImageBitmap" in window) || !("OffscreenCanvas" in window)) {
+    return createLuminanceMaskCanvasSync(image);
+  }
+  const bitmap = await createImageBitmap(image);
+  return runMaskWorker(bitmap);
+}
+
+function runMaskWorker(bitmap: ImageBitmap) {
+  return new Promise<HTMLCanvasElement | null>((resolve, reject) => {
+    const worker = getMaskWorker();
+    if (!worker) {
+      bitmap.close();
+      resolve(null);
+      return;
+    }
+    const id = ++maskWorkerRequestId;
+    maskWorkerRequests.set(id, { resolve, reject });
+    worker.postMessage({ id, bitmap }, [bitmap]);
+  });
+}
+
+function getMaskWorker() {
+  if (maskWorker) return maskWorker;
+  try {
+    maskWorker = new Worker(new URL("./maskWorker.ts", import.meta.url));
+    maskWorker.onmessage = (
+      event: MessageEvent<{ id: number; width?: number; height?: number; buffer?: ArrayBuffer; error?: string }>
+    ) => {
+      const request = maskWorkerRequests.get(event.data.id);
+      if (!request) return;
+      maskWorkerRequests.delete(event.data.id);
+      if (event.data.error || !event.data.buffer || !event.data.width || !event.data.height) {
+        request.reject(new Error(event.data.error || "mask worker 返回无效结果。"));
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = event.data.width;
+      canvas.height = event.data.height;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        request.resolve(null);
+        return;
+      }
+      context.putImageData(new ImageData(new Uint8ClampedArray(event.data.buffer), event.data.width, event.data.height), 0, 0);
+      request.resolve(canvas);
+    };
+    maskWorker.onerror = (event) => {
+      const error = new Error(event.message || "mask worker 出错。");
+      for (const request of maskWorkerRequests.values()) request.reject(error);
+      maskWorkerRequests.clear();
+      maskWorker?.terminate();
+      maskWorker = null;
+    };
+    return maskWorker;
+  } catch {
+    maskWorker = null;
+    return null;
+  }
+}
+
+function createLuminanceMaskCanvasSync(image: HTMLImageElement) {
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const { data } = imageData;
+  for (let index = 0; index < data.length; index += 4) {
+    const sourceAlpha = data[index + 3];
+    const luminanceAlpha = Math.max(data[index], data[index + 1], data[index + 2]);
+    const alpha = sourceAlpha < 255 ? sourceAlpha : luminanceAlpha;
+    data[index] = 255;
+    data[index + 1] = 255;
+    data[index + 2] = 255;
+    data[index + 3] = alpha;
+  }
+  context.putImageData(imageData, 0, 0);
+  return canvas;
 }
 
 type Props = {
@@ -274,6 +398,7 @@ type LayoutPreviewProps = {
   selectedPieceId: string;
   textureUrl: string;
   fallbackTextureUrl?: string;
+  textureIsDesignCanvas?: boolean;
   designCanvas?: DesignCanvas | null;
   selectedLayerId?: string;
   showOutlines: boolean;
@@ -289,6 +414,7 @@ export function LayoutPreview({
   selectedPieceId,
   textureUrl,
   fallbackTextureUrl = "",
+  textureIsDesignCanvas = false,
   designCanvas,
   selectedLayerId = "",
   showOutlines,
@@ -399,7 +525,15 @@ export function LayoutPreview({
           <Stage width={Math.ceil(designBounds.width * designZoom)} height={Math.ceil(designBounds.height * designZoom)}>
             <Layer scaleX={designZoom} scaleY={designZoom}>
               <Rect x={0} y={0} width={designBounds.width} height={designBounds.height} fill="#ffffff" />
-              {textureImage && <KonvaImage image={textureImage} x={0} y={0} width={designBounds.width} height={designBounds.height} />}
+              {textureImage && (
+                <DesignTextureBackground
+                  image={textureImage}
+                  width={designBounds.width}
+                  height={designBounds.height}
+                  designCanvas={designCanvas || null}
+                  directImage={textureIsDesignCanvas}
+                />
+              )}
             </Layer>
             <Layer scaleX={designZoom} scaleY={designZoom}>
               {(designCanvas?.layers || []).map((layer) => (
@@ -449,8 +583,10 @@ function DesignRegionOutline({
   onSelect: () => void;
   onChange: (update: Partial<Piece["transform"]>) => void;
 }) {
-  const x = piece.transform.design_x ?? piece.source_x;
-  const y = piece.transform.design_y ?? piece.source_y;
+  const offsetX = piece.transform.offset_x || 0;
+  const offsetY = piece.transform.offset_y || 0;
+  const x = (piece.transform.design_x ?? piece.source_x) + offsetX;
+  const y = (piece.transform.design_y ?? piece.source_y) + offsetY;
   const width = piece.transform.design_width ?? piece.width;
   const height = piece.transform.design_height ?? piece.height;
   const locked = Boolean(piece.transform.locked);
@@ -470,7 +606,7 @@ function DesignRegionOutline({
         onTap={onSelect}
         onDragEnd={(event) => {
           event.cancelBubble = true;
-          onChange({ design_x: Math.round(event.target.x()), design_y: Math.round(event.target.y()) });
+          onChange({ design_x: Math.round(event.target.x() - offsetX), design_y: Math.round(event.target.y() - offsetY) });
         }}
       />
       <Text
@@ -486,10 +622,10 @@ function DesignRegionOutline({
       />
       {selected && !locked && (
         <>
-          <ResizeHandle x={x} y={y} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "top_left", onChange)} />
-          <ResizeHandle x={x + width} y={y} cursor="nesw-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "top_right", onChange)} />
-          <ResizeHandle x={x} y={y + height} cursor="nesw-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "bottom_left", onChange)} />
-          <ResizeHandle x={x + width} y={y + height} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, nx, ny, "bottom_right", onChange)} />
+          <ResizeHandle x={x} y={y} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, offsetX, offsetY, nx, ny, "top_left", onChange)} />
+          <ResizeHandle x={x + width} y={y} cursor="nesw-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, offsetX, offsetY, nx, ny, "top_right", onChange)} />
+          <ResizeHandle x={x} y={y + height} cursor="nesw-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, offsetX, offsetY, nx, ny, "bottom_left", onChange)} />
+          <ResizeHandle x={x + width} y={y + height} cursor="nwse-resize" onMove={(nx, ny) => onResizeRegion(x, y, width, height, offsetX, offsetY, nx, ny, "bottom_right", onChange)} />
         </>
       )}
     </>
@@ -528,6 +664,8 @@ function onResizeRegion(
   y: number,
   width: number,
   height: number,
+  offsetX: number,
+  offsetY: number,
   nextX: number,
   nextY: number,
   corner: "top_left" | "top_right" | "bottom_left" | "bottom_right",
@@ -539,18 +677,132 @@ function onResizeRegion(
     const bottom = y + height;
     const nx = Math.min(nextX, right - minSize);
     const ny = Math.min(nextY, bottom - minSize);
-    onChange({ design_x: nx, design_y: ny, design_width: right - nx, design_height: bottom - ny });
+    onChange({ design_x: nx - offsetX, design_y: ny - offsetY, design_width: right - nx, design_height: bottom - ny });
   } else if (corner === "top_right") {
     const bottom = y + height;
     const ny = Math.min(nextY, bottom - minSize);
-    onChange({ design_y: ny, design_width: Math.max(minSize, nextX - x), design_height: bottom - ny });
+    onChange({ design_y: ny - offsetY, design_width: Math.max(minSize, nextX - x), design_height: bottom - ny });
   } else if (corner === "bottom_left") {
     const right = x + width;
     const nx = Math.min(nextX, right - minSize);
-    onChange({ design_x: nx, design_width: right - nx, design_height: Math.max(minSize, nextY - y) });
+    onChange({ design_x: nx - offsetX, design_width: right - nx, design_height: Math.max(minSize, nextY - y) });
   } else {
     onChange({ design_width: Math.max(minSize, nextX - x), design_height: Math.max(minSize, nextY - y) });
   }
+}
+
+function DesignTextureBackground({
+  image,
+  width,
+  height,
+  designCanvas,
+  directImage
+}: {
+  image: HTMLImageElement;
+  width: number;
+  height: number;
+  designCanvas: DesignCanvas | null;
+  directImage: boolean;
+}) {
+  const tileSource = useMemo(() => {
+    if (directImage) return image;
+    if (!designCanvas?.mirror) return image;
+    return makeMirrorTileCanvas(image);
+  }, [designCanvas?.mirror, directImage, image]);
+
+  const tiles = useMemo(() => {
+    const sourceWidth = tileSource.width || image.naturalWidth || image.width;
+    const sourceHeight = tileSource.height || image.naturalHeight || image.height;
+    if (sourceWidth <= 0 || sourceHeight <= 0) return [];
+
+    if (directImage) {
+      return [{ key: "direct", x: 0, y: 0, width, height }];
+    }
+
+    const scale = Math.max(0.05, Number(designCanvas?.texture_scale || 1));
+    const tileWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const tileHeight = Math.max(1, Math.round(sourceHeight * scale));
+    const tileEnabled = designCanvas?.tile !== false;
+    if (!tileEnabled) {
+      const offsetX = Number(designCanvas?.texture_offset_x || 0);
+      const offsetY = Number(designCanvas?.texture_offset_y || 0);
+      return [
+        {
+          key: "single",
+          x: Math.round((width - tileWidth) / 2 + offsetX),
+          y: Math.round((height - tileHeight) / 2 + offsetY),
+          width: tileWidth,
+          height: tileHeight
+        }
+      ];
+    }
+
+    const offsetX = Number(designCanvas?.texture_offset_x || 0);
+    const offsetY = Number(designCanvas?.texture_offset_y || 0);
+    const startX = -tileWidth + positiveModulo(offsetX, tileWidth);
+    const startY = -tileHeight + positiveModulo(offsetY, tileHeight);
+    const nextTiles: Array<{ key: string; x: number; y: number; width: number; height: number }> = [];
+    for (let y = startY; y < height + tileHeight && nextTiles.length < 500; y += tileHeight) {
+      for (let x = startX; x < width + tileWidth && nextTiles.length < 500; x += tileWidth) {
+        nextTiles.push({ key: `${x}:${y}`, x, y, width: tileWidth, height: tileHeight });
+      }
+    }
+    return nextTiles;
+  }, [
+    designCanvas?.texture_offset_x,
+    designCanvas?.texture_offset_y,
+    designCanvas?.texture_scale,
+    designCanvas?.tile,
+    directImage,
+    height,
+    image.height,
+    image.naturalHeight,
+    image.naturalWidth,
+    image.width,
+    tileSource,
+    width
+  ]);
+
+  return (
+    <>
+      {tiles.map((tile) => (
+        <KonvaImage key={tile.key} image={tileSource} x={tile.x} y={tile.y} width={tile.width} height={tile.height} listening={false} />
+      ))}
+    </>
+  );
+}
+
+function makeMirrorTileCanvas(image: HTMLImageElement) {
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, sourceWidth * 2);
+  canvas.height = Math.max(1, sourceHeight * 2);
+  const context = canvas.getContext("2d");
+  if (!context) return image;
+
+  context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+  context.save();
+  context.translate(sourceWidth * 2, 0);
+  context.scale(-1, 1);
+  context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+  context.restore();
+  context.save();
+  context.translate(0, sourceHeight * 2);
+  context.scale(1, -1);
+  context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+  context.restore();
+  context.save();
+  context.translate(sourceWidth * 2, sourceHeight * 2);
+  context.scale(-1, -1);
+  context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+  context.restore();
+  return canvas;
+}
+
+function positiveModulo(value: number, size: number) {
+  if (!Number.isFinite(value) || size <= 0) return 0;
+  return ((value % size) + size) % size;
 }
 
 function DesignLayerNode({ layer, selected, onSelect, onMove }: { layer: DesignLayer; selected: boolean; onSelect: () => void; onMove: (update: Partial<DesignLayer>) => void }) {

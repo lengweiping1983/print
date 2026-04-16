@@ -159,8 +159,13 @@ export const api = {
       body: JSON.stringify(patch),
     });
   },
+  deleteTemplateSetPieceDef(setId: string, defId: string) {
+    return request<{ deleted: string }>(`/api/template-sets/${setId}/piece-defs/${defId}`, {
+      method: "DELETE",
+    });
+  },
   listTemplateSizePieces(setId: string, sizeId: string) {
-    return request<SizeTemplatePiece[]>(`/api/template-sets/${setId}/sizes/${sizeId}/pieces`);
+    return request<SizeTemplatePiece[]>(`/api/template-sets/${setId}/sizes/${sizeId}/pieces?t=${Date.now()}`);
   },
   patchTemplateSizePiece(setId: string, sizeId: string, pieceId: string, patch: { piece_def_id: string }) {
     return request<SizeTemplatePiece>(`/api/template-sets/${setId}/sizes/${sizeId}/pieces/${pieceId}`, {
@@ -169,13 +174,24 @@ export const api = {
       body: JSON.stringify(patch),
     });
   },
+  deleteTemplateSizePiece(setId: string, sizeId: string, pieceId: string) {
+    return request<{ deleted: string }>(`/api/template-sets/${setId}/sizes/${sizeId}/pieces/${pieceId}`, {
+      method: "DELETE",
+    });
+  },
   deleteTemplateSetSize(setId: string, sizeId: string) {
     return request<{ deleted: string }>(`/api/template-sets/${setId}/sizes/${sizeId}`, { method: "DELETE" });
+  },
+  deleteTemplateSet(setId: string) {
+    return request<{ deleted: string }>(`/api/template-sets/${setId}`, { method: "DELETE" });
   },
   setTemplateSetBaseSize(setId: string, sizeTemplateId: string) {
     const form = new FormData();
     form.set("size_template_id", sizeTemplateId);
     return request<TemplateSet>(`/api/template-sets/${setId}/base-size`, { method: "POST", body: form });
+  },
+  confirmTemplateSetMapping(setId: string) {
+    return request<TemplateSet>(`/api/template-sets/${setId}/confirm-mapping`, { method: "POST" });
   },
   createProjectFromTemplateSet(setId: string, sizeName: string, copyDesignFromBase = true) {
     return request<Project>("/api/projects/from-template-set", {

@@ -9,6 +9,7 @@ from typing import Any, Iterator
 from .config import DB_PATH, STORAGE_DIR
 
 SCHEMA_LOCK = threading.Lock()
+SCHEMA_READY = False
 
 SCHEMA_SQL = """
 create table if not exists projects (
@@ -103,6 +104,7 @@ create table if not exists template_sets (
   description text not null default '',
   base_size_template_id text not null default '',
   design_canvas text not null default '{}',
+  mapping_confirmed_at text not null default '',
   created_at text not null,
   updated_at text not null
 );
@@ -152,6 +154,7 @@ create table if not exists size_template_pieces (
   centroid_x real not null,
   centroid_y real not null,
   scale_to_base real not null default 1.0,
+  transform text not null default '{}',
   created_at text not null,
   updated_at text not null,
   foreign key(size_template_id) references size_templates(id),
@@ -180,8 +183,7 @@ def loads(value: str | None, default: Any = None) -> Any:
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
     ensure_schema()
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+    con = open_connection()
     try:
         yield con
         con.commit()
@@ -194,15 +196,49 @@ def init_db() -> None:
 
 
 def ensure_schema() -> None:
+    global SCHEMA_READY
+    if SCHEMA_READY:
+        return
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
     with SCHEMA_LOCK:
-        con = sqlite3.connect(DB_PATH)
+        if SCHEMA_READY:
+            return
+        con = open_connection()
         try:
             con.executescript(SCHEMA_SQL)
+            ensure_system_project(con)
             ensure_texture_columns(con)
+            ensure_template_set_columns(con)
+            ensure_size_template_pieces_columns(con)
             con.commit()
+            SCHEMA_READY = True
         finally:
             con.close()
+
+
+def open_connection() -> sqlite3.Connection:
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    configure_connection(con)
+    return con
+
+
+def configure_connection(con: sqlite3.Connection) -> None:
+    con.execute("pragma journal_mode=WAL")
+    con.execute("pragma synchronous=NORMAL")
+    con.execute("pragma busy_timeout=5000")
+    con.execute("pragma foreign_keys=ON")
+
+
+def ensure_system_project(con: sqlite3.Connection) -> None:
+    current = now_iso()
+    con.execute(
+        """
+        insert or ignore into projects(id, name, size_name, dpi, unit, canvas_width, canvas_height, export_config, created_at, updated_at)
+        values ('', '模板套装素材', '', 300, 'px', 0, 0, '{}', ?, ?)
+        """,
+        (current, current),
+    )
 
 
 def ensure_texture_columns(con: sqlite3.Connection) -> None:
@@ -217,6 +253,18 @@ def ensure_texture_columns(con: sqlite3.Connection) -> None:
     for name, definition in additions.items():
         if name not in columns:
             con.execute(f"alter table textures add column {name} {definition}")
+
+
+def ensure_template_set_columns(con: sqlite3.Connection) -> None:
+    columns = {row[1] for row in con.execute("pragma table_info(template_sets)").fetchall()}
+    if "mapping_confirmed_at" not in columns:
+        con.execute("alter table template_sets add column mapping_confirmed_at text not null default ''")
+
+
+def ensure_size_template_pieces_columns(con: sqlite3.Connection) -> None:
+    columns = {row[1] for row in con.execute("pragma table_info(size_template_pieces)").fetchall()}
+    if "transform" not in columns:
+        con.execute("alter table size_template_pieces add column transform text not null default '{}'")
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:

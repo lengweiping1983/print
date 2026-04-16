@@ -40,26 +40,38 @@ export default function TemplatesPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {sets.map((set) => (
-            <Link
+            <div
               key={set.id}
-              href={`/templates/${set.id}`}
-              className="rounded-lg border border-line bg-white p-4 shadow-panel transition hover:border-action"
+              className="relative rounded-lg border border-line bg-white p-4 shadow-panel transition hover:border-action"
             >
-              <h2 className="flex items-center gap-2 text-lg font-semibold">
-                {set.name}
-                {set.has_mapping_issues && <span className="text-coral" title="裁片对应关系异常">!</span>}
-              </h2>
-              <p className="text-sm text-slate-500">
-                {set.version_label ? `版本：${set.version_label}` : "无版本标签"} · {" "}
-                {set.garment_type === "shirt" ? "衬衫" : set.garment_type === "t_shirt" ? "T 恤" : "未知类型"}
-              </p>
-              <div className="mt-2 flex items-center gap-2">
-                <p className="text-xs text-slate-400">基准尺寸：{set.base_size_template_id ? "已设置" : "未设置"}</p>
-                {set.has_mapping_issues && (
-                  <span className="rounded bg-coral/10 px-1.5 py-0.5 text-[10px] font-medium text-coral">裁片对应待确认</span>
-                )}
-              </div>
-            </Link>
+              <Link href={`/templates/${set.id}`} className="block">
+                <h2 className="flex items-center gap-2 text-lg font-semibold">
+                  {set.name}
+                  {set.has_mapping_issues && <span className="text-coral" title="裁片对应关系异常">!</span>}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  {set.version_label ? `版本：${set.version_label}` : "无版本标签"} · {" "}
+                  {set.garment_type === "shirt" ? "衬衫" : set.garment_type === "t_shirt" ? "T 恤" : "未知类型"}
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <p className="text-xs text-slate-400">基准尺寸：{set.base_size_template_id ? "已设置" : "未设置"}</p>
+                  {set.has_mapping_issues && (
+                    <span className="rounded bg-coral/10 px-1.5 py-0.5 text-[10px] font-medium text-coral">裁片对应待确认</span>
+                  )}
+                </div>
+              </Link>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (!confirm(`确定删除套装「${set.name}」？此操作不可恢复。`)) return;
+                  await api.deleteTemplateSet(set.id);
+                  setSets((prev) => prev.filter((s) => s.id !== set.id));
+                }}
+                className="absolute right-2 top-2 rounded px-2 py-1 text-xs text-coral hover:bg-coral/10"
+              >
+                删除
+              </button>
+            </div>
           ))}
         </div>
       )}

@@ -2,7 +2,8 @@
 
 import type { Asset, DesignCanvas, DesignLayer, GlobalFitOptions, Job, Piece, PieceTransform, Project, SizeTemplate, TemplateSet, Texture } from "@print-studio/shared-types";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { SetStateAction } from "react";
+import { useEffect, useMemo, useReducer, useRef } from "react";
 import { api, waitForJob } from "@/lib/api";
 import { PIECE_ROLE_LABELS, JOB_TYPE_LABELS, JOB_STATUS_LABELS } from "@/lib/labels";
 import { FileField, LayoutPreviewLoading, LayerEditor, Panel, Range, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
@@ -30,39 +31,152 @@ const emptyTransform: PieceTransform = {
   locked: false
 };
 
+type StudioState = {
+  project: Project | null;
+  assets: Asset[];
+  pieces: Piece[];
+  textures: Texture[];
+  selectedPieceId: string;
+  sourceType: "pattern" | "garment_photo" | "ai" | "library";
+  prompt: string;
+  job: Job | null;
+  notice: string;
+  templateFileName: string;
+  textureFileName: string;
+  textureViewMode: "source" | "seamless";
+  showOutlines: boolean;
+  outlineWidth: number;
+  garmentType: "unknown" | "t_shirt" | "shirt";
+  textureAngle: number;
+  globalTextureScale: number;
+  globalOffsetX: number;
+  globalOffsetY: number;
+  globalSymmetry: "continuous" | "mirror";
+  globalAnchor: string;
+  designCanvas: DesignCanvas | null;
+  selectedLayerId: string;
+  layersDirty: boolean;
+  autoRenderingDesign: boolean;
+  showTemplateDialog: boolean;
+  templateSets: TemplateSet[];
+  selectedSetId: string;
+  selectedSetSizes: SizeTemplate[];
+  copyDesignFromBase: boolean;
+};
+
+type StudioAction =
+  | { type: "patch"; patch: Partial<StudioState> }
+  | { type: "setField"; field: keyof StudioState; value: SetStateAction<StudioState[keyof StudioState]> };
+
+const initialStudioState: StudioState = {
+  project: null,
+  assets: [],
+  pieces: [],
+  textures: [],
+  selectedPieceId: "",
+  sourceType: "pattern",
+  prompt: "深蓝底色，花卉与飞鹤纹样，适合男士衬衫裁片打样",
+  job: null,
+  notice: "正在准备工作台...",
+  templateFileName: "",
+  textureFileName: "",
+  textureViewMode: "source",
+  showOutlines: true,
+  outlineWidth: 5,
+  garmentType: "unknown",
+  textureAngle: 0,
+  globalTextureScale: 1,
+  globalOffsetX: 0,
+  globalOffsetY: 0,
+  globalSymmetry: "continuous",
+  globalAnchor: "front_center",
+  designCanvas: null,
+  selectedLayerId: "",
+  layersDirty: false,
+  autoRenderingDesign: false,
+  showTemplateDialog: false,
+  templateSets: [],
+  selectedSetId: "",
+  selectedSetSizes: [],
+  copyDesignFromBase: true
+};
+
+function studioReducer(state: StudioState, action: StudioAction): StudioState {
+  if (action.type === "patch") return { ...state, ...action.patch };
+  const current = state[action.field];
+  const next = typeof action.value === "function" ? (action.value as (value: typeof current) => typeof current)(current) : action.value;
+  return { ...state, [action.field]: next };
+}
+
 export function StudioPage() {
-  const [project, setProject] = useState<Project | null>(null);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [pieces, setPieces] = useState<Piece[]>([]);
-  const [textures, setTextures] = useState<Texture[]>([]);
-  const [selectedPieceId, setSelectedPieceId] = useState("");
-  const [sourceType, setSourceType] = useState<"pattern" | "garment_photo" | "ai" | "library">("pattern");
-  const [prompt, setPrompt] = useState("深蓝底色，花卉与飞鹤纹样，适合男士衬衫裁片打样");
-  const [job, setJob] = useState<Job | null>(null);
-  const [notice, setNotice] = useState("正在准备工作台...");
-  const [templateFileName, setTemplateFileName] = useState("");
-  const [textureFileName, setTextureFileName] = useState("");
-  const [textureViewMode, setTextureViewMode] = useState<"source" | "seamless">("source");
-  const [showOutlines, setShowOutlines] = useState(true);
-  const [outlineWidth, setOutlineWidth] = useState(5);
-  const [garmentType, setGarmentType] = useState<"unknown" | "t_shirt" | "shirt">("unknown");
-  const [textureAngle, setTextureAngle] = useState(0);
-  const [globalTextureScale, setGlobalTextureScale] = useState(1);
-  const [globalOffsetX, setGlobalOffsetX] = useState(0);
-  const [globalOffsetY, setGlobalOffsetY] = useState(0);
-  const [globalSymmetry, setGlobalSymmetry] = useState<"continuous" | "mirror">("continuous");
-  const [globalAnchor, setGlobalAnchor] = useState("front_center");
-  const [designCanvas, setDesignCanvas] = useState<DesignCanvas | null>(null);
-  const [selectedLayerId, setSelectedLayerId] = useState("");
-  const [layersDirty, setLayersDirty] = useState(false);
-  const [autoRenderingDesign, setAutoRenderingDesign] = useState(false);
+  const [state, dispatch] = useReducer(studioReducer, initialStudioState);
+  const {
+    project,
+    assets,
+    pieces,
+    textures,
+    selectedPieceId,
+    sourceType,
+    prompt,
+    job,
+    notice,
+    templateFileName,
+    textureFileName,
+    textureViewMode,
+    showOutlines,
+    outlineWidth,
+    garmentType,
+    textureAngle,
+    globalTextureScale,
+    globalOffsetX,
+    globalOffsetY,
+    globalSymmetry,
+    globalAnchor,
+    designCanvas,
+    selectedLayerId,
+    layersDirty,
+    autoRenderingDesign,
+    showTemplateDialog,
+    templateSets,
+    selectedSetId,
+    selectedSetSizes,
+    copyDesignFromBase
+  } = state;
+  const setField = <K extends keyof StudioState>(field: K, value: SetStateAction<StudioState[K]>) => {
+    dispatch({ type: "setField", field, value: value as SetStateAction<StudioState[keyof StudioState]> });
+  };
+  const setProject = (value: SetStateAction<Project | null>) => setField("project", value);
+  const setAssets = (value: SetStateAction<Asset[]>) => setField("assets", value);
+  const setPieces = (value: SetStateAction<Piece[]>) => setField("pieces", value);
+  const setTextures = (value: SetStateAction<Texture[]>) => setField("textures", value);
+  const setSelectedPieceId = (value: SetStateAction<string>) => setField("selectedPieceId", value);
+  const setSourceType = (value: SetStateAction<StudioState["sourceType"]>) => setField("sourceType", value);
+  const setPrompt = (value: SetStateAction<string>) => setField("prompt", value);
+  const setJob = (value: SetStateAction<Job | null>) => setField("job", value);
+  const setNotice = (value: SetStateAction<string>) => setField("notice", value);
+  const setTemplateFileName = (value: SetStateAction<string>) => setField("templateFileName", value);
+  const setTextureFileName = (value: SetStateAction<string>) => setField("textureFileName", value);
+  const setTextureViewMode = (value: SetStateAction<StudioState["textureViewMode"]>) => setField("textureViewMode", value);
+  const setShowOutlines = (value: SetStateAction<boolean>) => setField("showOutlines", value);
+  const setOutlineWidth = (value: SetStateAction<number>) => setField("outlineWidth", value);
+  const setGarmentType = (value: SetStateAction<StudioState["garmentType"]>) => setField("garmentType", value);
+  const setTextureAngle = (value: SetStateAction<number>) => setField("textureAngle", value);
+  const setGlobalTextureScale = (value: SetStateAction<number>) => setField("globalTextureScale", value);
+  const setGlobalOffsetX = (value: SetStateAction<number>) => setField("globalOffsetX", value);
+  const setGlobalOffsetY = (value: SetStateAction<number>) => setField("globalOffsetY", value);
+  const setGlobalSymmetry = (value: SetStateAction<StudioState["globalSymmetry"]>) => setField("globalSymmetry", value);
+  const setGlobalAnchor = (value: SetStateAction<string>) => setField("globalAnchor", value);
+  const setDesignCanvas = (value: SetStateAction<DesignCanvas | null>) => setField("designCanvas", value);
+  const setSelectedLayerId = (value: SetStateAction<string>) => setField("selectedLayerId", value);
+  const setLayersDirty = (value: SetStateAction<boolean>) => setField("layersDirty", value);
+  const setAutoRenderingDesign = (value: SetStateAction<boolean>) => setField("autoRenderingDesign", value);
+  const setShowTemplateDialog = (value: SetStateAction<boolean>) => setField("showTemplateDialog", value);
+  const setTemplateSets = (value: SetStateAction<TemplateSet[]>) => setField("templateSets", value);
+  const setSelectedSetId = (value: SetStateAction<string>) => setField("selectedSetId", value);
+  const setSelectedSetSizes = (value: SetStateAction<SizeTemplate[]>) => setField("selectedSetSizes", value);
+  const setCopyDesignFromBase = (value: SetStateAction<boolean>) => setField("copyDesignFromBase", value);
   const prevJobRef = useRef<Job | null>(null);
   const layerRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
-  const [templateSets, setTemplateSets] = useState<TemplateSet[]>([]);
-  const [selectedSetId, setSelectedSetId] = useState("");
-  const [selectedSetSizes, setSelectedSetSizes] = useState<SizeTemplate[]>([]);
-  const [copyDesignFromBase, setCopyDesignFromBase] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -131,6 +245,9 @@ export function StudioPage() {
   const canUseLayers = Boolean(designCanvas && activeTexture?.design_canvas_url);
   const globalPieceCount = pieces.filter((piece) => piece.transform.mode === "global_canvas" && piece.transform.global_enabled !== false).length;
   const designLayers = designCanvas?.layers || [];
+  const designLayerSignature = designLayers
+    .map((layer) => `${layer.id}:${layer.x}:${layer.y}:${layer.width}:${layer.height}:${layer.rotation}:${layer.opacity}:${layer.visible}:${layer.locked}:${layer.content || ""}`)
+    .join("|");
   const selectedLayer = designLayers.find((layer) => layer.id === selectedLayerId) || designLayers[0] || null;
   const safetyReport = designCanvas?.safety_report || [];
 
@@ -143,7 +260,7 @@ export function StudioPage() {
     return () => {
       if (layerRenderTimerRef.current) clearTimeout(layerRenderTimerRef.current);
     };
-  }, [layersDirty, project?.id, activeTexture?.id, autoRenderingDesign, designLayers]);
+  }, [layersDirty, project?.id, activeTexture?.id, autoRenderingDesign, designLayerSignature]);
 
   async function upload(kind: string, file: File) {
     if (!project) return;
@@ -272,7 +389,7 @@ export function StudioPage() {
     }
   }
 
-  async function saveDesignCanvas(next: DesignCanvas, dirty = true) {
+  async function saveDesignCanvas(next: DesignCanvas, dirty = true, rollbackSelectedLayerId = selectedLayerId) {
     if (!project) return;
     const previous = designCanvas;
     const previousDirty = layersDirty;
@@ -284,6 +401,7 @@ export function StudioPage() {
     } catch (error) {
       setDesignCanvas(previous);
       setLayersDirty(previousDirty);
+      setSelectedLayerId(rollbackSelectedLayerId);
       setNotice(readError(error));
     }
   }
@@ -300,8 +418,9 @@ export function StudioPage() {
     }
     const layer = createLayer("image", designCanvas, asset);
     const next = { ...designCanvas, layers: [...designLayers, layer] };
+    const previousSelectedLayerId = selectedLayerId;
     setSelectedLayerId(layer.id);
-    await saveDesignCanvas(next);
+    await saveDesignCanvas(next, true, previousSelectedLayerId);
   }
 
   async function addTextLayer() {
@@ -311,8 +430,9 @@ export function StudioPage() {
     }
     const layer = createLayer("text", designCanvas);
     const next = { ...designCanvas, layers: [...designLayers, layer] };
+    const previousSelectedLayerId = selectedLayerId;
     setSelectedLayerId(layer.id);
-    await saveDesignCanvas(next);
+    await saveDesignCanvas(next, true, previousSelectedLayerId);
   }
 
   async function patchLayer(layerId: string, update: Partial<DesignLayer>) {
@@ -325,8 +445,9 @@ export function StudioPage() {
     if (!designCanvas) return;
     const nextLayers = designLayers.filter((layer) => layer.id !== layerId);
     const next = { ...designCanvas, layers: nextLayers };
+    const previousSelectedLayerId = selectedLayerId;
     setSelectedLayerId(nextLayers[0]?.id || "");
-    await saveDesignCanvas(next);
+    await saveDesignCanvas(next, true, previousSelectedLayerId);
   }
 
   async function regenerateDesignCanvas(options: { silent?: boolean } = {}) {
@@ -768,6 +889,7 @@ export function StudioPage() {
           selectedPieceId={selectedPieceId}
           textureUrl={workspaceTextureUrl}
           fallbackTextureUrl={selectedInputTextureUrl}
+          textureIsDesignCanvas={Boolean(activeTexture?.design_canvas_url)}
           designCanvas={designCanvas}
           selectedLayerId={selectedLayerId}
           showOutlines={showOutlines}

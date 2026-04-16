@@ -1,6 +1,6 @@
 "use client";
 
-import type { SetPieceDef, SizeTemplate, SizeTemplatePiece, TemplateSet } from "@print-studio/shared-types";
+import type { PieceTransform, SetPieceDef, SizeTemplate, SizeTemplatePiece, TemplateSet } from "@print-studio/shared-types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -50,6 +50,16 @@ export default function SizeTemplateDetailPage() {
     setSaving(false);
   }
 
+  async function deletePiece(pieceId: string) {
+    if (!setId || !sizeId) return;
+    if (!confirm("确定删除该裁片吗？")) return;
+    setSaving(true);
+    await api.deleteTemplateSizePiece(setId, sizeId, pieceId);
+    await loadAll();
+    setNotice("裁片已删除");
+    setSaving(false);
+  }
+
   async function updateDefName(defId: string, name: string) {
     if (!setId) return;
     setSaving(true);
@@ -65,6 +75,19 @@ export default function SizeTemplateDetailPage() {
     await api.patchTemplateSetPieceDef(setId, defId, { piece_role });
     await loadAll();
     setNotice("角色已更新");
+    setSaving(false);
+  }
+
+  async function updateBaseTransform(defId: string, patch: Partial<PieceTransform>) {
+    if (!setId) return;
+    setSaving(true);
+    const def = pieceDefs.find((d) => d.id === defId);
+    const current = (def?.base_transform || {}) as PieceTransform;
+    await api.patchTemplateSetPieceDef(setId, defId, {
+      base_transform: { ...current, ...patch },
+    });
+    await loadAll();
+    setNotice("基准花位已更新");
     setSaving(false);
   }
 
@@ -121,18 +144,30 @@ export default function SizeTemplateDetailPage() {
           <h2 className="mb-2 text-sm font-semibold">裁片列表</h2>
           <div className="max-h-[600px] space-y-2 overflow-auto">
             {pieces.map((piece) => (
-              <button
+              <div
                 key={piece.id}
-                onClick={() => setSelectedPieceId(piece.id)}
-                className={`w-full rounded border px-2 py-2 text-left text-sm ${
+                className={`group flex items-center justify-between rounded border px-2 py-2 text-sm ${
                   piece.id === selectedPieceId ? "border-action bg-emerald-50" : "border-line bg-white"
                 }`}
               >
-                <div className="font-medium">{piece.name}</div>
-                <div className="text-xs text-slate-500">
-                  {piece.width}×{piece.height} · 比例 {piece.scale_to_base.toFixed(3)}
-                </div>
-              </button>
+                <button
+                  onClick={() => setSelectedPieceId(piece.id)}
+                  className="flex-1 text-left"
+                >
+                  <div className="font-medium">{piece.name}</div>
+                  <div className="text-xs text-slate-500">
+                    {piece.width}×{piece.height} · 比例 {piece.scale_to_base.toFixed(3)}
+                  </div>
+                </button>
+                <button
+                  onClick={() => deletePiece(piece.id)}
+                  disabled={saving}
+                  className="ml-2 rounded px-1.5 py-1 text-[10px] font-medium text-coral opacity-0 transition hover:bg-coral/10 group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
+                  title="删除"
+                >
+                  删除
+                </button>
+              </div>
             ))}
           </div>
         </aside>
@@ -216,39 +251,96 @@ export default function SizeTemplateDetailPage() {
               </div>
 
               {sizeTemplate.is_base ? (
-                <div className="space-y-3 rounded bg-mist p-3">
-                  <p className="text-xs text-slate-500">当前为基准尺寸，修改以下参数会同步影响所有尺寸。</p>
-                  <label className="block">
-                    <span className="text-xs font-semibold">裁片名称</span>
-                    <input
-                      className="mt-1 w-full rounded border border-line px-2 py-1"
-                      defaultValue={selectedPiece.name}
-                      onBlur={(e) => {
-                        const def = pieceDefs.find((d) => d.id === selectedPiece.piece_def_id);
-                        if (def && e.target.value !== def.name) {
-                          updateDefName(def.id, e.target.value);
-                        }
-                      }}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs font-semibold">裁片角色</span>
-                    <select
-                      className="mt-1 w-full rounded border border-line bg-white px-2 py-1"
-                      defaultValue={selectedPiece.piece_role}
-                      onChange={(e) => {
-                        const def = pieceDefs.find((d) => d.id === selectedPiece.piece_def_id);
-                        if (def) updateDefRole(def.id, e.target.value);
-                      }}
-                    >
-                      {Object.entries(PIECE_ROLE_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                (() => {
+                  const def = pieceDefs.find((d) => d.id === selectedPiece.piece_def_id);
+                  const bt = (def?.base_transform || {}) as PieceTransform;
+                  const num = (label: string, key: keyof PieceTransform, min: number, max: number, step = 1) => (
+                    <label key={key} className="block">
+                      <span className="text-[10px] font-medium text-slate-500">{label}</span>
+                      <input
+                        type="number"
+                        step={step}
+                        min={min}
+                        max={max}
+                        className="mt-0.5 w-full rounded border border-line px-2 py-1 text-xs"
+                        value={(bt[key] as number) ?? 0}
+                        onChange={(e) => {
+                          const v = step < 1 ? parseFloat(e.target.value) : parseInt(e.target.value, 10);
+                          if (!Number.isNaN(v)) updateBaseTransform(def!.id, { [key]: v } as Partial<PieceTransform>);
+                        }}
+                      />
+                    </label>
+                  );
+                  return (
+                    <div className="space-y-3 rounded bg-mist p-3">
+                      <p className="text-xs text-slate-500">当前为基准尺寸，修改以下参数会同步影响所有尺寸。</p>
+                      <label className="block">
+                        <span className="text-xs font-semibold">裁片名称</span>
+                        <input
+                          className="mt-1 w-full rounded border border-line px-2 py-1"
+                          defaultValue={selectedPiece.name}
+                          onBlur={(e) => {
+                            if (def && e.target.value !== def.name) {
+                              updateDefName(def.id, e.target.value);
+                            }
+                          }}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold">裁片角色</span>
+                        <select
+                          className="mt-1 w-full rounded border border-line bg-white px-2 py-1"
+                          defaultValue={selectedPiece.piece_role}
+                          onChange={(e) => {
+                            if (def) updateDefRole(def.id, e.target.value);
+                          }}
+                        >
+                          {Object.entries(PIECE_ROLE_LABELS).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      {def && (
+                        <>
+                          <div className="border-t border-line pt-2">
+                            <p className="mb-2 text-xs font-semibold">基准花位设计</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {num("全局 X", "design_x", 0, 8192)}
+                              {num("全局 Y", "design_y", 0, 8192)}
+                              {num("取样宽", "design_width", 24, 8192)}
+                              {num("取样高", "design_height", 24, 8192)}
+                              {num("平移 X", "offset_x", -1500, 1500)}
+                              {num("平移 Y", "offset_y", -1500, 1500)}
+                              {num("缩放", "scale", 0.2, 6, 0.01)}
+                              {num("旋转", "rotation", -180, 180)}
+                            </div>
+                            <div className="mt-2 flex items-center gap-3">
+                              <label className="flex items-center gap-1 text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={bt.mirror_x || false}
+                                  onChange={(e) => updateBaseTransform(def.id, { mirror_x: e.target.checked })}
+                                />
+                                水平镜像
+                              </label>
+                              <label className="flex items-center gap-1 text-xs">
+                                <input
+                                  type="checkbox"
+                                  checked={bt.mirror_y || false}
+                                  onChange={(e) => updateBaseTransform(def.id, { mirror_y: e.target.checked })}
+                                />
+                                垂直镜像
+                              </label>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()
               ) : (
                 <div className="space-y-3 rounded bg-amber-50 p-3">
                   <p className="text-xs text-amber-800">当前为非基准尺寸，若自动匹配有误，可手动关联到基准裁片。</p>
@@ -270,6 +362,14 @@ export default function SizeTemplateDetailPage() {
                   </label>
                 </div>
               )}
+
+              <button
+                onClick={() => deletePiece(selectedPiece.id)}
+                disabled={saving}
+                className="w-full rounded border border-coral/30 bg-coral/5 px-3 py-2 text-xs font-semibold text-coral hover:bg-coral/10"
+              >
+                删除该裁片
+              </button>
             </div>
           ) : (
             <p className="text-sm text-slate-500">请选择裁片</p>

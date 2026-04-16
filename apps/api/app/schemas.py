@@ -187,6 +187,7 @@ class TemplateSetOut(BaseModel):
     base_size_template_id: str
     design_canvas: dict[str, Any]
     has_mapping_issues: bool
+    mapping_confirmed_at: str
     created_at: str
     updated_at: str
 
@@ -206,6 +207,7 @@ class SetPieceDefPatch(BaseModel):
     piece_role: str = ""
     name: str = ""
     sort_order: int = -1
+    base_transform: dict[str, Any] = Field(default_factory=dict)
 
 
 class SizeTemplateOut(BaseModel):
@@ -245,6 +247,7 @@ class SizeTemplatePieceOut(BaseModel):
     centroid_x: float
     centroid_y: float
     scale_to_base: float
+    transform: dict[str, Any]
     created_at: str
     updated_at: str
 

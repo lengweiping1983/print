@@ -4,7 +4,7 @@ import time
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
-from app.db import storage_path
+from app.db import connect, storage_path
 from app.image_ops import marker_path_for_mask
 from app.main import app
 
@@ -31,6 +31,25 @@ def test_preview_creates_default_texture_when_none_exists() -> None:
 
         assert job["status"] == "succeeded"
         assert job["output"]["preview_url"].endswith("preview.png")
+
+
+def test_sqlite_connection_uses_wal_mode() -> None:
+    with connect() as con:
+        journal_mode = con.execute("pragma journal_mode").fetchone()[0]
+        busy_timeout = con.execute("pragma busy_timeout").fetchone()[0]
+        foreign_keys = con.execute("pragma foreign_keys").fetchone()[0]
+
+    assert journal_mode == "wal"
+    assert busy_timeout == 5000
+    assert foreign_keys == 1
+
+
+def test_unknown_project_is_not_auto_recovered() -> None:
+    client = TestClient(app)
+    with client:
+        response = client.get("/api/projects/prj_doesnotexist")
+
+    assert response.status_code == 404
 
 
 def test_upload_rejects_oversized_image(monkeypatch) -> None:

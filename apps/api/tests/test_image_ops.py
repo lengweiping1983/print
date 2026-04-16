@@ -3,6 +3,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from app.image_ops import (
+    _collect_component_spans,
     extract_alpha_components,
     make_layout_template,
     make_mirror_tile,
@@ -29,6 +30,26 @@ def test_extract_alpha_components_sorts_by_area(tmp_path: Path) -> None:
     assert pieces[0]["area"] > pieces[1]["area"]
     assert pieces[0]["bbox"] == {"x": 10, "y": 10, "width": 61, "height": 71}
     assert pieces[0]["mask_path"].exists()
+
+
+def test_collect_component_spans_does_not_mutate_mask() -> None:
+    mask = bytearray(
+        [
+            0, 0, 0, 0,
+            0, 1, 1, 0,
+            0, 1, 0, 0,
+            0, 0, 0, 0,
+        ]
+    )
+    original = bytes(mask)
+    visited = bytearray(16)
+
+    spans, area, *_ = _collect_component_spans(5, mask, visited, 4, 4)
+
+    assert area == 3
+    assert spans
+    assert bytes(mask) == original
+    assert sum(visited) == 3
 
 
 def test_make_layout_template_removes_only_edge_connected_white_background(tmp_path: Path) -> None:
@@ -119,6 +140,30 @@ def test_render_piece_from_design_canvas_samples_shared_region(tmp_path: Path) -
         mask,
         design,
         {"mode": "global_canvas", "design_x": 40, "design_y": 0, "design_width": 20, "design_height": 20},
+        out,
+    )
+
+    rendered = Image.open(out).convert("RGBA")
+    pixel = rendered.getpixel((10, 10))
+    assert pixel[2] > 200
+    assert pixel[0] < 50
+
+
+def test_render_piece_from_design_canvas_applies_local_offset(tmp_path: Path) -> None:
+    mask = tmp_path / "piece_mask.png"
+    Image.new("L", (20, 20), 255).save(mask)
+    design = tmp_path / "design.png"
+    image = Image.new("RGBA", (80, 40), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 39, 39), fill=(255, 0, 0, 255))
+    draw.rectangle((40, 0, 79, 39), fill=(0, 80, 255, 255))
+    image.save(design)
+
+    out = tmp_path / "piece.png"
+    render_piece_from_design_canvas(
+        mask,
+        design,
+        {"mode": "global_canvas", "design_x": 0, "design_y": 0, "offset_x": 40, "design_width": 20, "design_height": 20},
         out,
     )
 

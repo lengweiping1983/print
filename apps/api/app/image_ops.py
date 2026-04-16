@@ -41,11 +41,15 @@ def ensure_image_within_limit(path: Path) -> tuple[int, int]:
 def has_transparent_alpha(image_path: Path, transparent_threshold: int = 250) -> bool:
     ensure_image_within_limit(image_path)
     with Image.open(image_path) as img:
-        if img.mode not in {"RGBA", "LA"} and "transparency" not in img.info:
-            return False
-        alpha = img.convert("RGBA").getchannel("A")
-        min_alpha, _ = alpha.getextrema()
-        return min_alpha < transparent_threshold
+        return has_transparent_alpha_image(img, transparent_threshold)
+
+
+def has_transparent_alpha_image(img: Image.Image, transparent_threshold: int = 250) -> bool:
+    if img.mode not in {"RGBA", "LA"} and "transparency" not in img.info:
+        return False
+    alpha = img.convert("RGBA").getchannel("A")
+    min_alpha, _ = alpha.getextrema()
+    return min_alpha < transparent_threshold
 
 
 def make_layout_template(
@@ -55,32 +59,43 @@ def make_layout_template(
     channel_delta: int = 28,
 ) -> Path:
     ensure_image_within_limit(image_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with Image.open(image_path).convert("RGBA") as img:
-        r, g, b, alpha = img.split()
-        white = r.point(lambda value: 255 if value >= white_threshold else 0)
-        white = ImageChops.multiply(white, g.point(lambda value: 255 if value >= white_threshold else 0))
-        white = ImageChops.multiply(white, b.point(lambda value: 255 if value >= white_threshold else 0))
-        max_channel = ImageChops.lighter(r, ImageChops.lighter(g, b))
-        min_channel = ImageChops.darker(r, ImageChops.darker(g, b))
-        neutral = ImageChops.subtract(max_channel, min_channel).point(lambda value: 255 if value <= channel_delta else 0)
-        candidate = ImageChops.multiply(white, neutral)
-        transparent = alpha.point(lambda value: 255 if value <= 10 else 0)
-        candidate = ImageChops.lighter(candidate, transparent)
-        width, height = candidate.size
-        background = _edge_connected_background(candidate)
-        if background is None:
-            background = _scanline_edge_connected_background(candidate.tobytes(), width, height)
-            alpha_bytes = bytearray(width * height)
-            for idx, is_background in enumerate(background):
-                alpha_bytes[idx] = 0 if is_background else 255
-            alpha_mask = Image.frombytes("L", (width, height), bytes(alpha_bytes))
-        else:
-            alpha_mask = Image.fromarray(np.where(background, 0, 255).astype("uint8"))
+    with Image.open(image_path) as img:
+        return make_layout_template_from_image(img.convert("RGBA"), out_path, white_threshold, channel_delta)
 
-        out = img.copy()
-        out.putalpha(alpha_mask)
-        out.save(out_path)
+
+def make_layout_template_from_image(
+    img: Image.Image,
+    out_path: Path,
+    white_threshold: int = 240,
+    channel_delta: int = 28,
+) -> Path:
+    ensure_dimensions_within_limit(*img.size)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    rgba = img.convert("RGBA")
+    r, g, b, alpha = rgba.split()
+    white = r.point(lambda value: 255 if value >= white_threshold else 0)
+    white = ImageChops.multiply(white, g.point(lambda value: 255 if value >= white_threshold else 0))
+    white = ImageChops.multiply(white, b.point(lambda value: 255 if value >= white_threshold else 0))
+    max_channel = ImageChops.lighter(r, ImageChops.lighter(g, b))
+    min_channel = ImageChops.darker(r, ImageChops.darker(g, b))
+    neutral = ImageChops.subtract(max_channel, min_channel).point(lambda value: 255 if value <= channel_delta else 0)
+    candidate = ImageChops.multiply(white, neutral)
+    transparent = alpha.point(lambda value: 255 if value <= 10 else 0)
+    candidate = ImageChops.lighter(candidate, transparent)
+    width, height = candidate.size
+    background = _edge_connected_background(candidate)
+    if background is None:
+        background = _scanline_edge_connected_background(candidate.tobytes(), width, height)
+        alpha_bytes = bytearray(width * height)
+        for idx, is_background in enumerate(background):
+            alpha_bytes[idx] = 0 if is_background else 255
+        alpha_mask = Image.frombytes("L", (width, height), bytes(alpha_bytes))
+    else:
+        alpha_mask = Image.fromarray(np.where(background, 0, 255).astype("uint8"))
+
+    out = rgba.copy()
+    out.putalpha(alpha_mask)
+    out.save(out_path)
     return out_path
 
 
@@ -91,14 +106,25 @@ def make_red_marker_mask(
     red_delta: int = 45,
 ) -> Path | None:
     ensure_image_within_limit(image_path)
+    with Image.open(image_path) as img:
+        return make_red_marker_mask_from_image(img.convert("RGBA"), out_path, red_min, red_delta)
+
+
+def make_red_marker_mask_from_image(
+    img: Image.Image,
+    out_path: Path,
+    red_min: int = 145,
+    red_delta: int = 45,
+) -> Path | None:
+    ensure_dimensions_within_limit(*img.size)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with Image.open(image_path).convert("RGBA") as img:
-        r, g, b, alpha = img.split()
-        max_non_red = ImageChops.lighter(g, b)
-        strong_red = ImageChops.subtract(r, max_non_red)
-        mask = r.point(lambda value: 255 if value >= red_min else 0)
-        mask = ImageChops.multiply(mask, strong_red.point(lambda value: 255 if value >= red_delta else 0))
-        mask = ImageChops.multiply(mask, alpha.point(lambda value: 255 if value > 10 else 0))
+    rgba = img.convert("RGBA")
+    r, g, b, alpha = rgba.split()
+    max_non_red = ImageChops.lighter(g, b)
+    strong_red = ImageChops.subtract(r, max_non_red)
+    mask = r.point(lambda value: 255 if value >= red_min else 0)
+    mask = ImageChops.multiply(mask, strong_red.point(lambda value: 255 if value >= red_delta else 0))
+    mask = ImageChops.multiply(mask, alpha.point(lambda value: 255 if value > 10 else 0))
 
     if not mask.getbbox():
         out_path.unlink(missing_ok=True)
@@ -215,12 +241,20 @@ def extract_alpha_components(
     min_area: int = MIN_COMPONENT_AREA,
 ) -> list[dict]:
     ensure_image_within_limit(image_path)
-    out_dir.mkdir(parents=True, exist_ok=True)
     with Image.open(image_path).convert("RGBA") as img:
-        alpha = img.getchannel("A")
-        width, height = img.size
-        alpha_bytes = alpha.tobytes()
+        return extract_alpha_components_from_image(img, out_dir, min_area)
 
+
+def extract_alpha_components_from_image(
+    img: Image.Image,
+    out_dir: Path,
+    min_area: int = MIN_COMPONENT_AREA,
+) -> list[dict]:
+    ensure_dimensions_within_limit(*img.size)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    alpha = img.convert("RGBA").getchannel("A")
+    width, height = alpha.size
+    alpha_bytes = alpha.tobytes()
     cv2_pieces = _extract_alpha_components_cv2(alpha, out_dir, min_area)
     if cv2_pieces is not None:
         return cv2_pieces
@@ -236,6 +270,9 @@ def extract_alpha_components(
             break
 
         spans, area, min_x, min_y, max_x, max_y, sum_x, sum_y = _collect_component_spans(start, mask, visited, width, height)
+        for left, right, y in spans:
+            row_start = y * width
+            mask[row_start + left : row_start + right + 1] = b"\0" * (right - left + 1)
         start += 1
         if area < min_area:
             continue
@@ -368,7 +405,6 @@ def _collect_component_spans(
         row_start = y * width
         for x in range(left, right + 1):
             visited[row_start + x] = 1
-            mask[row_start + x] = 0
 
         count = right - left + 1
         area += count

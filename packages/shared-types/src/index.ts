@@ -196,6 +196,7 @@ export type TemplateSet = {
   base_size_template_id: string;
   design_canvas: Record<string, unknown>;
   has_mapping_issues: boolean;
+  mapping_confirmed_at: string;
   created_at: string;
   updated_at: string;
 };
@@ -248,6 +249,7 @@ export type SizeTemplatePiece = {
   centroid_x: number;
   centroid_y: number;
   scale_to_base: number;
+  transform: PieceTransform;
   created_at: string;
   updated_at: string;
 };
