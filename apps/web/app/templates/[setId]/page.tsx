@@ -234,21 +234,10 @@ export default function TemplateSetDetailPage() {
       if (pieceA) {
         promises.push(api.patchTemplateSizePiece(setId, sizeId, pieceA.id, { piece_def_id: defB }));
       }
-      const results = await Promise.all(promises);
-      // 立即局部更新状态，无需等待 refresh 即可看到变化
-      setSizePiecesMap((prev) => {
-        const next = { ...prev };
-        next[sizeId] = prev[sizeId].map((p) => {
-          const updated = results.find((r) => r.id === p.id);
-          return updated ? updated : p;
-        });
-        return next;
-      });
-      await refresh();
-      setNotice("对应关系已更新");
+      await Promise.all(promises);
+      window.location.reload();
     } catch (err) {
       setNotice(String(err instanceof Error ? err.message : "更新失败"));
-    } finally {
       setPickerOpen(false);
     }
   }
@@ -262,17 +251,10 @@ export default function TemplateSetDetailPage() {
       return;
     }
     try {
-      const updated = await api.patchTemplateSizePiece(setId, sizeId, pieceA.id, { piece_def_id: "" });
-      setSizePiecesMap((prev) => {
-        const next = { ...prev };
-        next[sizeId] = prev[sizeId].map((p) => (p.id === updated.id ? updated : p));
-        return next;
-      });
-      await refresh();
-      setNotice("对应关系已清空");
+      await api.patchTemplateSizePiece(setId, sizeId, pieceA.id, { piece_def_id: "" });
+      window.location.reload();
     } catch (err) {
       setNotice(String(err instanceof Error ? err.message : "更新失败"));
-    } finally {
       setPickerOpen(false);
     }
   }

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from app.texture_analysis import detect_repeat_period
+from app.texture_analysis import detect_content_centroid, detect_repeat_period
 
 
 def test_detect_repeat_period_finds_vertical_stripes(tmp_path: Path) -> None:
@@ -55,3 +55,52 @@ def test_detect_repeat_period_ignores_transparent_logo(tmp_path: Path) -> None:
     repeat = detect_repeat_period(path)
 
     assert repeat["has_repeat"] is False
+
+
+def test_detect_content_centroid_finds_transparent_logo(tmp_path: Path) -> None:
+    path = tmp_path / "logo.png"
+    image = Image.new("RGBA", (100, 80), (255, 255, 255, 0))
+    ImageDraw.Draw(image).rectangle((20, 18, 60, 58), fill=(20, 20, 20, 255))
+    image.save(path)
+
+    content = detect_content_centroid(path)
+
+    assert content["has_content"] is True
+    assert content["method"] == "alpha_centroid_v1"
+    assert abs(content["centroid"]["x"] - 40) <= 1
+    assert abs(content["centroid"]["y"] - 38) <= 1
+    assert content["content_bbox"] == {"x": 20, "y": 18, "width": 41, "height": 41}
+
+
+def test_detect_content_centroid_ignores_flat_texture(tmp_path: Path) -> None:
+    path = tmp_path / "flat.png"
+    Image.new("RGBA", (96, 96), (24, 128, 220, 255)).save(path)
+
+    content = detect_content_centroid(path)
+
+    assert content["has_content"] is False
+
+
+def test_detect_content_centroid_ignores_large_coverage(tmp_path: Path) -> None:
+    path = tmp_path / "large.png"
+    image = Image.new("RGBA", (100, 100), (255, 255, 255, 0))
+    ImageDraw.Draw(image).rectangle((2, 2, 97, 97), fill=(20, 20, 20, 255))
+    image.save(path)
+
+    content = detect_content_centroid(path)
+
+    assert content["has_content"] is False
+
+
+def test_detect_content_centroid_finds_opaque_foreground(tmp_path: Path) -> None:
+    path = tmp_path / "foreground.png"
+    image = Image.new("RGB", (100, 80), (245, 245, 245))
+    ImageDraw.Draw(image).ellipse((30, 20, 70, 60), fill=(20, 80, 180))
+    image.save(path)
+
+    content = detect_content_centroid(path)
+
+    assert content["has_content"] is True
+    assert content["method"] == "foreground_centroid_v1"
+    assert abs(content["centroid"]["x"] - 50) <= 2
+    assert abs(content["centroid"]["y"] - 40) <= 2

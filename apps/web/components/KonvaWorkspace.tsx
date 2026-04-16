@@ -277,10 +277,10 @@ function createOutlineCanvas(source: CanvasImageSource, thickness = 2, color = "
   return canvas;
 }
 
-function getMirroredTexture(image: HTMLImageElement, mirrorX: boolean, mirrorY: boolean) {
+function getMirroredTexture(image: HTMLImageElement | HTMLCanvasElement, mirrorX: boolean, mirrorY: boolean) {
   if (!mirrorX && !mirrorY) return image;
-  const w = image.naturalWidth || image.width || 1;
-  const h = image.naturalHeight || image.height || 1;
+  const w = ("naturalWidth" in image ? image.naturalWidth || image.width : image.width) || 1;
+  const h = ("naturalHeight" in image ? image.naturalHeight || image.height : image.height) || 1;
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
@@ -922,17 +922,29 @@ function DimmedTextureLayer({
   const frameScale = frame.width / Math.max(1, piece.width);
   const globalMode = piece.transform.mode === "global_canvas";
   const rotation = globalMode ? piece.transform.design_rotation ?? 0 : piece.transform.rotation;
-  const scale = globalMode
-    ? frame.width / Math.max(1, piece.transform.design_width ?? piece.width)
-    : piece.transform.scale * frameScale;
-  const imageCenterX = frame.x + frame.width / 2;
-  const imageCenterY = frame.y + frame.height / 2;
+  const cropX = wrapCropCoordinate((piece.transform.design_x ?? 0) + piece.transform.offset_x, textureImage.naturalWidth);
+  const cropY = wrapCropCoordinate((piece.transform.design_y ?? 0) + piece.transform.offset_y, textureImage.naturalHeight);
+  const crop = globalMode
+    ? {
+        x: cropX,
+        y: cropY,
+        width: Math.max(1, piece.transform.design_width ?? piece.width),
+        height: Math.max(1, piece.transform.design_height ?? piece.height)
+      }
+    : undefined;
+  const tiledSample = useTiledTextureSample(textureImage, crop || null);
+  const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : piece.transform.offset_x * frameScale);
+  const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : piece.transform.offset_y * frameScale);
+  const basePatternSource = globalMode ? tiledSample || textureImage : textureImage;
   const patternSource = useMemo(
-    () => getMirroredTexture(textureImage, piece.transform.mirror_x || false, piece.transform.mirror_y || false),
-    [textureImage, piece.transform.mirror_x, piece.transform.mirror_y]
+    () => getMirroredTexture(basePatternSource, piece.transform.mirror_x || false, piece.transform.mirror_y || false),
+    [basePatternSource, piece.transform.mirror_x, piece.transform.mirror_y]
   );
-  const sourceWidth = (patternSource as HTMLImageElement).naturalWidth || (patternSource as HTMLCanvasElement).width || textureImage.naturalWidth || 1;
-  const sourceHeight = (patternSource as HTMLImageElement).naturalHeight || (patternSource as HTMLCanvasElement).height || textureImage.naturalHeight || 1;
+  const sourceWidth = ("naturalWidth" in patternSource ? patternSource.naturalWidth || patternSource.width : patternSource.width) || 1;
+  const sourceHeight = ("naturalHeight" in patternSource ? patternSource.naturalHeight || patternSource.height : patternSource.height) || 1;
+  const patternScale = globalMode
+    ? frame.width / Math.max(1, (tiledSample ? tiledSample.width : textureImage.naturalWidth) || 1)
+    : piece.transform.scale * frameScale;
   return (
     <Layer scaleX={zoom} scaleY={zoom}>
       <Rect
@@ -941,8 +953,8 @@ function DimmedTextureLayer({
         width={stageWidth}
         height={stageHeight}
         fillPatternImage={patternSource as unknown as HTMLImageElement}
-        fillPatternScaleX={scale}
-        fillPatternScaleY={scale}
+        fillPatternScaleX={patternScale}
+        fillPatternScaleY={patternScale}
         fillPatternRotation={rotation}
         fillPatternX={imageCenterX}
         fillPatternY={imageCenterY}

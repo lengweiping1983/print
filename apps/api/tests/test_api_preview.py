@@ -237,6 +237,57 @@ def test_texture_generation_recommends_source_for_transparent_logo() -> None:
         assert texture["fit_source"] == "source"
         assert texture["seamless_path"] == ""
         assert texture["analysis"]["recommendation"] == "source"
+        assert texture["analysis"]["content_centroid"]["has_content"] is True
+
+
+def test_global_fit_aligns_source_content_centroid_to_anchor() -> None:
+    client = TestClient(app)
+    with client:
+        project = client.post("/api/projects", json={"name": "content alignment"}).json()
+        mask = Image.new("RGBA", (180, 120), (0, 0, 0, 0))
+        ImageDraw.Draw(mask).rectangle((10, 10, 100, 100), fill=(255, 255, 255, 255))
+        mask_buf = BytesIO()
+        mask.save(mask_buf, format="PNG")
+        mask_buf.seek(0)
+        template = client.post(
+            f"/api/projects/{project['id']}/assets",
+            data={"kind": "template"},
+            files={"file": ("template.png", mask_buf, "image/png")},
+        ).json()
+        import_template(client, project["id"], template["id"])
+
+        logo = Image.new("RGBA", (80, 80), (255, 255, 255, 0))
+        ImageDraw.Draw(logo).rectangle((20, 20, 60, 60), fill=(20, 20, 20, 255))
+        logo_buf = BytesIO()
+        logo.save(logo_buf, format="PNG")
+        logo_buf.seek(0)
+        asset = client.post(
+            f"/api/projects/{project['id']}/assets",
+            data={"kind": "pattern"},
+            files={"file": ("logo.png", logo_buf, "image/png")},
+        ).json()
+        texture_job = client.post(
+            f"/api/projects/{project['id']}/textures/generate",
+            json={"source_asset_id": asset["id"], "source_type": "pattern", "prompt": "胸前 logo", "provider": "local", "model": "local-copy"},
+        ).json()["job_id"]
+        texture = wait_job(client, texture_job)["output"]["texture"]
+
+        fit_job = client.post(
+            f"/api/projects/{project['id']}/textures/{texture['id']}/fit-global",
+            json={"texture_source": "source", "texture_scale": 1, "texture_angle": 0, "anchor": "front_center", "texture_offset_x": 10, "texture_offset_y": -5},
+        ).json()["job_id"]
+        fit = wait_job(client, fit_job)
+
+        canvas = fit["output"]["design_canvas"]
+        content = canvas["texture_content"]
+        alignment = canvas["content_alignment"]
+        target = canvas["design_anchors"]["front_center"]
+        assert content["has_content"] is True
+        assert alignment["enabled"] is True
+        assert alignment["anchor"] == "front_center"
+        assert abs((content["centroid"]["x"] + canvas["texture_offset_x"]) - (target["x"] + 10)) < 0.01
+        assert abs((content["centroid"]["y"] + canvas["texture_offset_y"]) - (target["y"] - 5)) < 0.01
+        assert fit["output"]["texture"]["fit_source"] == "source"
 
 
 def test_texture_generation_auto_creates_seamless_for_water_pattern() -> None:
@@ -329,6 +380,7 @@ def test_global_fit_texture_source_selection_and_fallback() -> None:
         assert fit["output"]["texture"]["fit_source"] == "seamless"
         assert fit["output"]["texture"]["seamless_path"].endswith("_seamless.png")
         assert fit["output"]["texture"]["design_canvas_path"].endswith("_design_canvas.png")
+        assert fit["output"]["design_canvas"]["content_alignment"]["enabled"] is False
 
 
 def test_design_canvas_layers_safety_and_export_manifest() -> None:

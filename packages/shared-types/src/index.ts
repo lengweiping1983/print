@@ -101,6 +101,23 @@ export type TextureRepeat = {
   method: string;
 };
 
+export type ContentCentroid = {
+  has_content: boolean;
+  centroid: { x: number; y: number };
+  content_bbox: DesignRect;
+  opaque_ratio: number;
+  confidence: number;
+  method: string;
+};
+
+export type ContentAlignment = {
+  enabled: boolean;
+  anchor: string;
+  offset_x: number;
+  offset_y: number;
+  note: string;
+};
+
 export type DesignCanvas = {
   width: number;
   height: number;
@@ -119,6 +136,8 @@ export type DesignCanvas = {
   safety_report: SafetyReportItem[];
   size_mapping: Record<string, unknown>;
   texture_repeat?: TextureRepeat;
+  texture_content?: ContentCentroid;
+  content_alignment?: ContentAlignment;
 };
 
 export type GlobalFitOptions = {

@@ -105,6 +105,7 @@ def analyze_texture_fit_source(
             reasons.append("判断置信度不高，保守使用原图。")
 
     repeat_period = detect_repeat_period(image_path, image_stats=image_stats)
+    content_centroid = detect_content_centroid(image_path, image_stats=image_stats)
 
     return {
         "recommendation": recommendation,
@@ -117,8 +118,41 @@ def analyze_texture_fit_source(
         "source_keywords": source_hits,
         "seamless_keywords": seamless_hits,
         "repeat_period": repeat_period,
+        "content_centroid": content_centroid,
         "reasons": reasons,
     }
+
+
+def detect_content_centroid(image_path: Path, *, image_stats: dict[str, float] | None = None) -> dict[str, Any]:
+    result = {
+        "has_content": False,
+        "centroid": {"x": 0.0, "y": 0.0},
+        "content_bbox": {"x": 0, "y": 0, "width": 0, "height": 0},
+        "opaque_ratio": 0.0,
+        "confidence": 0.0,
+        "method": "none",
+    }
+    stats = image_stats or _image_stats(image_path)
+    with Image.open(image_path).convert("RGBA") as img:
+        width, height = img.size
+        if stats["transparent_ratio"] > 0.08 or stats["edge_alpha_ratio"] < 0.92:
+            alpha = img.getchannel("A")
+            mask = [value > 10 for value in alpha.tobytes()]
+            return _content_result_from_mask(mask, width, height, "alpha_centroid_v1", max_coverage=0.85)
+
+        rgb = img.convert("RGB")
+        stat = ImageStat.Stat(rgb)
+        if sum(stat.stddev[:3]) / 3 < 8:
+            return result
+        bg = _edge_average_rgb(rgb)
+        pixels = rgb.tobytes()
+        mask = []
+        for index in range(0, len(pixels), 3):
+            dr = int(pixels[index]) - bg[0]
+            dg = int(pixels[index + 1]) - bg[1]
+            db = int(pixels[index + 2]) - bg[2]
+            mask.append(math.sqrt(dr * dr + dg * dg + db * db) > 55)
+        return _content_result_from_mask(mask, width, height, "foreground_centroid_v1", max_coverage=0.65)
 
 
 def detect_repeat_period(image_path: Path, *, image_stats: dict[str, float] | None = None) -> dict[str, Any]:
@@ -259,3 +293,81 @@ def _detect_axis_period(values: Any) -> tuple[int, float]:
             best_score = scores[index]
 
     return best_period, max(0.0, min(1.0, best_score))
+
+
+def _content_result_from_mask(
+    mask: list[bool],
+    width: int,
+    height: int,
+    method: str,
+    *,
+    max_coverage: float,
+) -> dict[str, Any]:
+    total = max(1, width * height)
+    count = sum(1 for value in mask if value)
+    opaque_ratio = count / total
+    result = {
+        "has_content": False,
+        "centroid": {"x": 0.0, "y": 0.0},
+        "content_bbox": {"x": 0, "y": 0, "width": 0, "height": 0},
+        "opaque_ratio": round(opaque_ratio, 4),
+        "confidence": 0.0,
+        "method": method,
+    }
+    if count == 0 or opaque_ratio < 0.002 or opaque_ratio > max_coverage:
+        return result
+
+    min_x = width
+    min_y = height
+    max_x = 0
+    max_y = 0
+    sum_x = 0
+    sum_y = 0
+    for index, value in enumerate(mask):
+        if not value:
+            continue
+        x = index % width
+        y = index // width
+        min_x = min(min_x, x)
+        min_y = min(min_y, y)
+        max_x = max(max_x, x)
+        max_y = max(max_y, y)
+        sum_x += x
+        sum_y += y
+
+    bbox_w = max_x - min_x + 1
+    bbox_h = max_y - min_y + 1
+    bbox_ratio = (bbox_w * bbox_h) / total
+    if bbox_ratio > max_coverage:
+        return result
+
+    confidence = 0.9 if method == "alpha_centroid_v1" else 0.68
+    result.update(
+        {
+            "has_content": True,
+            "centroid": {"x": round(sum_x / count, 2), "y": round(sum_y / count, 2)},
+            "content_bbox": {"x": min_x, "y": min_y, "width": bbox_w, "height": bbox_h},
+            "confidence": confidence,
+        }
+    )
+    return result
+
+
+def _edge_average_rgb(image: Image.Image) -> tuple[float, float, float]:
+    width, height = image.size
+    pixels = image.load()
+    if pixels is None:
+        return (0.0, 0.0, 0.0)
+    samples: list[tuple[int, int, int]] = []
+    for x in range(width):
+        samples.append(pixels[x, 0])
+        samples.append(pixels[x, height - 1])
+    for y in range(1, max(1, height - 1)):
+        samples.append(pixels[0, y])
+        samples.append(pixels[width - 1, y])
+    count = max(1, len(samples))
+    return (
+        sum(sample[0] for sample in samples) / count,
+        sum(sample[1] for sample in samples) / count,
+        sum(sample[2] for sample in samples) / count,
+    )

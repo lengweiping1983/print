@@ -60,7 +60,7 @@ from .schemas import (
     TextureOut,
 )
 from .template_ops import match_pieces_to_base, pick_default_base_size, size_sort_key
-from .texture_analysis import analyze_texture_fit_source, detect_repeat_period
+from .texture_analysis import analyze_texture_fit_source, detect_content_centroid, detect_repeat_period
 
 ALLOWED_UPLOAD_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".svg"}
 
@@ -834,6 +834,7 @@ def patch_size_template_piece(
     data = row_to_dict(row)
     data["polygon"] = loads(data["polygon"], [])
     data["bbox"] = loads(data["bbox"], {})
+    data["transform"] = loads(data.get("transform"), {})
     data["mask_url"] = file_url(data["mask_path"])
     data["name"] = data.get("def_name") or "未命名"
     data["piece_role"] = data.get("def_role") or "unknown"
@@ -1329,7 +1330,10 @@ def _fit_global_job(job_id: str, payload: dict) -> dict:
     design_canvas = carry_existing_design_canvas(project_id, design_canvas)
     design_path = project_dir(project_id) / "textures" / f"{texture['id']}_design_canvas.png"
     texture_source_path, texture_source, texture_warnings = resolve_texture_source(texture, payload.get("texture_source"))
-    design_canvas["texture_repeat"] = texture_repeat_for_fit(texture, texture_source_path)
+    fit_analysis = texture_fit_analysis_for_fit(texture, texture_source_path)
+    design_canvas["texture_repeat"] = fit_analysis["repeat_period"]
+    design_canvas["texture_content"] = fit_analysis["content_centroid"]
+    apply_content_alignment(design_canvas, fit_analysis["content_centroid"], texture_source)
     mappings = auto_map_pieces(pieces, design_canvas, payload.get("garment_type", "unknown"))
     build_design_texture_canvas(texture_source_path, design_path, design_canvas, asset_paths(project_id))
     if payload.get("apply", True):
@@ -1686,21 +1690,71 @@ def texture_file(texture: dict) -> Path:
     return storage_path(texture.get("design_canvas_path") or texture.get("seamless_path") or texture["source_path"])
 
 
-def texture_repeat_for_fit(texture: dict, texture_source_path: Path) -> dict:
+def texture_fit_analysis_for_fit(texture: dict, texture_source_path: Path) -> dict:
     analysis = loads(texture.get("analysis"), {})
     repeat = analysis.get("repeat_period")
-    if isinstance(repeat, dict) and "has_repeat" in repeat:
-        return repeat
+    content = analysis.get("content_centroid")
+    changed = False
 
-    repeat = detect_repeat_period(texture_source_path)
-    analysis["repeat_period"] = repeat
-    texture["analysis"] = dumps(analysis)
-    with connect() as con:
-        con.execute(
-            "update textures set analysis = ?, version = version + 1 where id = ? and project_id = ?",
-            (dumps(analysis), texture["id"], texture["project_id"]),
-        )
-    return repeat
+    if not isinstance(repeat, dict) or "has_repeat" not in repeat:
+        repeat = detect_repeat_period(texture_source_path)
+        analysis["repeat_period"] = repeat
+        changed = True
+    if not isinstance(content, dict) or "has_content" not in content:
+        content = detect_content_centroid(texture_source_path)
+        analysis["content_centroid"] = content
+        changed = True
+
+    if changed:
+        texture["analysis"] = dumps(analysis)
+        with connect() as con:
+            con.execute(
+                "update textures set analysis = ?, version = version + 1 where id = ? and project_id = ?",
+                (dumps(analysis), texture["id"], texture["project_id"]),
+            )
+    return {"repeat_period": repeat, "content_centroid": content}
+
+
+def apply_content_alignment(design_canvas: dict, content: dict, texture_source: str) -> None:
+    alignment = {
+        "enabled": False,
+        "anchor": str(design_canvas.get("anchor") or "front_center"),
+        "offset_x": float(design_canvas.get("texture_offset_x", 0) or 0),
+        "offset_y": float(design_canvas.get("texture_offset_y", 0) or 0),
+        "note": "未检测到可用于定位的主体内容。",
+    }
+    if texture_source != "source":
+        alignment["note"] = "当前使用无缝图，主体重心定位未启用。"
+        design_canvas["content_alignment"] = alignment
+        return
+    if not content.get("has_content"):
+        design_canvas["content_alignment"] = alignment
+        return
+    angle = float(design_canvas.get("global_texture_angle", 0) or 0) % 360
+    if min(angle, 360 - angle) > 0.01:
+        alignment["note"] = "纹理存在旋转，主体重心定位未启用。"
+        design_canvas["content_alignment"] = alignment
+        return
+
+    anchors = design_canvas.get("design_anchors") or {}
+    anchor_name = alignment["anchor"]
+    target = anchors.get(anchor_name) or {"x": float(design_canvas.get("width", 0) or 0) / 2, "y": float(design_canvas.get("height", 0) or 0) / 2}
+    centroid = content.get("centroid") or {}
+    scale = max(0.05, float(design_canvas.get("texture_scale", 1) or 1))
+    user_offset_x = float(design_canvas.get("texture_offset_x", 0) or 0)
+    user_offset_y = float(design_canvas.get("texture_offset_y", 0) or 0)
+    offset_x = float(target.get("x", 0) or 0) - float(centroid.get("x", 0) or 0) * scale + user_offset_x
+    offset_y = float(target.get("y", 0) or 0) - float(centroid.get("y", 0) or 0) * scale + user_offset_y
+
+    design_canvas["texture_offset_x"] = round(offset_x, 2)
+    design_canvas["texture_offset_y"] = round(offset_y, 2)
+    design_canvas["content_alignment"] = {
+        "enabled": True,
+        "anchor": anchor_name,
+        "offset_x": round(offset_x, 2),
+        "offset_y": round(offset_y, 2),
+        "note": "已按主体重心对齐主视觉锚点。",
+    }
 
 
 def resolve_texture_source(texture: dict, requested_source: str | None) -> tuple[Path, str, list[str]]:
