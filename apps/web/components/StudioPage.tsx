@@ -652,6 +652,14 @@ export function StudioPage() {
                   setSelectedSetId(setId);
                   if (setId) {
                     void loadFromTemplateSet(setId);
+                  } else {
+                    setPieces([]);
+                    setAssets([]);
+                    setTextures([]);
+                    setDesignCanvas(null);
+                    setSelectedPieceId("");
+                    setProject(null);
+                    localStorage.removeItem(LAST_PROJECT_KEY);
                   }
                 }}
               >
@@ -722,7 +730,6 @@ export function StudioPage() {
               <p className="m-0 text-xs text-slate-500">
                 {activeTexture ? `纹理大小：${activeTexture.width} x ${activeTexture.height}` : "纹理大小：未生成"}
               </p>
-              <p className="m-0 text-xs text-slate-500">素材图：{textureFileName || "未上传"}</p>
               {activeTexture ? (
                 <>
                 <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
@@ -960,7 +967,7 @@ export function StudioPage() {
       {showAiTextureDialog && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-4">
           <form
-            className="relative w-full max-w-2xl rounded-lg border border-white/10 bg-zinc-900 p-4 text-white shadow-panel"
+            className="relative w-full max-w-2xl rounded-lg border border-line bg-white p-4 text-ink shadow-panel"
             onSubmit={(event) => {
               event.preventDefault();
               void handleTexture("ai");
@@ -968,24 +975,24 @@ export function StudioPage() {
           >
             <div className="mb-4 flex items-center justify-between">
               <div className="flex gap-2">
-                <button type="button" className="rounded-lg border border-white/15 px-4 py-3 text-xs text-zinc-300">
+                <button type="button" className="rounded-lg border border-line bg-white px-4 py-3 text-xs text-slate-600">
                   风格
                 </button>
-                <button type="button" className="rounded-lg border border-white/15 px-4 py-3 text-xs text-zinc-300">
+                <button type="button" className="rounded-lg border border-line bg-white px-4 py-3 text-xs text-slate-600">
                   标记
                 </button>
-                <button type="button" className="rounded-lg border border-white/15 px-4 py-3 text-xs text-zinc-300">
+                <button type="button" className="rounded-lg border border-line bg-white px-4 py-3 text-xs text-slate-600">
                   聚焦
                 </button>
               </div>
-              <button type="button" className="rounded-md px-2 py-1 text-zinc-400 hover:bg-white/10 hover:text-white" onClick={() => setShowAiTextureDialog(false)}>
+              <button type="button" className="rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" onClick={() => setShowAiTextureDialog(false)}>
                 x
               </button>
             </div>
             <div className="relative">
               <textarea
                 ref={aiTextareaRef}
-                className="min-h-28 w-full resize-y rounded-lg border border-transparent bg-transparent px-1 py-2 text-sm text-white outline-none placeholder:text-zinc-500"
+                className="min-h-28 w-full resize-y rounded-lg border border-transparent bg-transparent px-1 py-2 text-sm text-ink outline-none placeholder:text-slate-400"
                 value={prompt}
                 onChange={(event) => {
                   const value = event.target.value;
@@ -1021,12 +1028,12 @@ export function StudioPage() {
                 autoFocus
               />
               {showPromptMenu && fabricPrompts.length > 0 && (
-                <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-white/10 bg-zinc-800 py-1 shadow-lg">
+                <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-line bg-white py-1 shadow-lg">
                   {fabricPrompts.map((item, index) => (
                     <button
                       key={item.id}
                       type="button"
-                      className={`w-full px-3 py-2 text-left text-sm ${index === highlightedIndex ? "bg-white/10" : "hover:bg-white/5"}`}
+                      className={`w-full px-3 py-2 text-left text-sm ${index === highlightedIndex ? "bg-slate-100" : "hover:bg-slate-50"}`}
                       onMouseEnter={() => setHighlightedIndex(index)}
                       onClick={() => {
                         setPrompt(item.prompt);
@@ -1034,49 +1041,49 @@ export function StudioPage() {
                         setHighlightedIndex(0);
                       }}
                     >
-                      <span className="font-medium text-zinc-100">{item.name}</span>
-                      <span className="mx-1 text-zinc-500">·</span>
-                      <span className="text-zinc-400">适用场景：{item.scenarios}</span>
+                      <span className="font-medium text-ink">{item.name}</span>
+                      <span className="mx-1 text-slate-400">·</span>
+                      <span className="text-slate-500">适用场景：{item.scenarios}</span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-600">
               <span>Nano Banana Pro</span>
               <div ref={paramMenuRef} className="relative">
                 <button
                   type="button"
-                  className="rounded-md border border-white/15 px-2 py-1 hover:bg-white/5"
+                  className="rounded-md border border-line bg-white px-2 py-1 hover:bg-slate-50"
                   onClick={() => setShowParamMenu((v) => !v)}
                 >
                   {aiRatio} · {aiResolution}
                 </button>
                 {showParamMenu && (
                   <div
-                    className="absolute bottom-full left-0 z-50 mb-1 w-56 rounded-lg border border-white/10 bg-zinc-800 p-2 shadow-lg"
+                    className="absolute bottom-full left-0 z-50 mb-1 w-56 rounded-lg border border-line bg-white p-2 shadow-lg"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="mb-2 text-[10px] text-zinc-500">分辨率</div>
+                    <div className="mb-2 text-[10px] text-slate-500">分辨率</div>
                     <div className="mb-3 flex gap-1">
                       {(["1K", "2K", "4K"] as const).map((r) => (
                         <button
                           key={r}
                           type="button"
-                          className={`flex-1 rounded-md py-1 text-xs ${aiResolution === r ? "bg-white/20 text-white" : "text-zinc-400 hover:bg-white/10"}`}
+                          className={`flex-1 rounded-md py-1 text-xs ${aiResolution === r ? "bg-slate-200 text-ink" : "text-slate-500 hover:bg-slate-100"}`}
                           onClick={() => setAiResolution(r)}
                         >
                           {r}
                         </button>
                       ))}
                     </div>
-                    <div className="mb-2 text-[10px] text-zinc-500">比例</div>
+                    <div className="mb-2 text-[10px] text-slate-500">比例</div>
                     <div className="flex flex-wrap gap-1">
                       {(["1:1", "9:16", "16:9", "3:4", "4:3"] as const).map((rt) => (
                         <button
                           key={rt}
                           type="button"
-                          className={`rounded-md px-2 py-1 text-xs ${aiRatio === rt ? "bg-white/20 text-white" : "text-zinc-400 hover:bg-white/10"}`}
+                          className={`rounded-md px-2 py-1 text-xs ${aiRatio === rt ? "bg-slate-200 text-ink" : "text-slate-500 hover:bg-slate-100"}`}
                           onClick={() => setAiRatio(rt)}
                         >
                           {rt}
@@ -1086,8 +1093,8 @@ export function StudioPage() {
                   </div>
                 )}
               </div>
-              <span className="ml-auto rounded-md border border-white/15 px-2 py-1">1张</span>
-              <button type="submit" className="rounded-lg bg-zinc-200 px-4 py-2 font-semibold text-zinc-900">
+              <span className="ml-auto rounded-md border border-line bg-white px-2 py-1">1张</span>
+              <button type="submit" className="rounded-lg bg-action px-4 py-2 font-semibold text-white">
                 生成
               </button>
             </div>
