@@ -193,6 +193,7 @@ class TemplateSetOut(BaseModel):
     design_canvas: dict[str, Any]
     has_mapping_issues: bool
     mapping_confirmed_at: str
+    mapping_issue_details: dict[str, list[str]] = {}
     created_at: str
     updated_at: str
 

@@ -186,7 +186,7 @@ export default function TemplateSetDetailPage() {
     if (!setId) return;
     await api.patchTemplateSetPieceDef(setId, defId, { name });
     await refresh();
-    setNotice("名称已更新");
+    setNotice("名称已更新，对照表确认状态已重置，请重新确认。");
   }
 
   async function updateDefRole(defId: string, piece_role: string) {
@@ -245,7 +245,9 @@ export default function TemplateSetDetailPage() {
         promises.push(api.patchTemplateSizePiece(setId, sizeId, pieceA.id, { piece_def_id: defB }));
       }
       await Promise.all(promises);
-      window.location.reload();
+      await refresh();
+      setPickerOpen(false);
+      setNotice("对照关系已更新，请重新确认对照表后该套装才能在项目中使用。");
     } catch (err) {
       setNotice(String(err instanceof Error ? err.message : "更新失败"));
       setPickerOpen(false);
@@ -262,7 +264,9 @@ export default function TemplateSetDetailPage() {
     }
     try {
       await api.patchTemplateSizePiece(setId, sizeId, pieceA.id, { piece_def_id: "" });
-      window.location.reload();
+      await refresh();
+      setPickerOpen(false);
+      setNotice("对照关系已清空，请重新确认对照表后该套装才能在项目中使用。");
     } catch (err) {
       setNotice(String(err instanceof Error ? err.message : "更新失败"));
       setPickerOpen(false);
@@ -271,6 +275,10 @@ export default function TemplateSetDetailPage() {
 
   async function confirmMapping() {
     if (!setId) return;
+    if (pieceDefs.length === 0) {
+      setNotice("当前基准尺寸未识别到任何裁片，无法确认对照表。");
+      return;
+    }
     if (problemSizes.length > 0) {
       setNotice("请先修正异常尺寸后再确认");
       return;
@@ -362,7 +370,19 @@ export default function TemplateSetDetailPage() {
       {problemSizes.length > 0 ? (
         <div className="mb-4 rounded-lg border border-coral/30 bg-coral/10 px-4 py-3 text-sm text-coral">
           <p className="font-semibold">⚠️ 当前套装存在裁片对应关系异常</p>
-          <p className="mt-1">请在对照表中核对并修正，否则导出结果可能不正确。异常尺寸：{problemSizes.join("、")}</p>
+          <div className="mt-2 space-y-1">
+            {Object.entries(templateSet.mapping_issue_details || {}).map(([sizeName, reasons]) => (
+              <div key={sizeName}>
+                <span className="font-medium">{sizeName}：</span>
+                <ul className="ml-4 list-disc">
+                  {reasons.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2">请在对照表中核对并修正，否则导出结果可能不正确。</p>
         </div>
       ) : !templateSet.mapping_confirmed_at ? (
         <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">

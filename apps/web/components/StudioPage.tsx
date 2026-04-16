@@ -7,7 +7,7 @@ import type { SetStateAction } from "react";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { api, waitForJob } from "@/lib/api";
 import { JOB_TYPE_LABELS, JOB_STATUS_LABELS } from "@/lib/labels";
-import { LayoutPreviewLoading, LayerEditor, Panel, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
+import { LayoutPreviewLoading, LayerEditor, Panel, ResourceBar, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
 
 const SinglePieceCalibration = dynamic(() => import("./KonvaWorkspace").then((mod) => mod.SinglePieceCalibration), {
   ssr: false,
@@ -292,6 +292,8 @@ export function StudioPage() {
         localStorage.setItem(LAST_PROJECT_KEY, restored.project.id);
         setNotice(restored.created ? "项目已创建，请在左侧选择模板开始打样。" : "已恢复最近的裁片项目。");
       } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error("[boot] error:", error);
         if (active) setNotice(readError(error));
       }
     }
@@ -672,6 +674,33 @@ export function StudioPage() {
     setTextures(next);
   }
 
+  async function handleDeleteTexture(textureId: string) {
+    if (!project) return;
+    try {
+      await api.deleteTexture(project.id, textureId);
+      setTextures((prev) => {
+        const next = prev.filter((t) => t.id !== textureId);
+        if (prev[0]?.id === textureId && next[0]) {
+          setTextureViewMode(next[0].fit_source || next[0].fit_source_recommendation || "source");
+        }
+        return next;
+      });
+      setNotice("面料已删除");
+    } catch (error) {
+      setNotice(readError(error));
+    }
+  }
+
+  function handleSelectTexture(textureId: string) {
+    setTextures((prev) => {
+      const target = prev.find((t) => t.id === textureId);
+      if (!target) return prev;
+      const next = [target, ...prev.filter((t) => t.id !== textureId)];
+      setTextureViewMode(target.fit_source || target.fit_source_recommendation || "source");
+      return next;
+    });
+  }
+
   async function openTemplateDialog() {
     const sets = await api.listTemplateSets();
     const availableSets = sets.filter((s) => s.mapping_confirmed_at && !s.has_mapping_issues);
@@ -820,6 +849,9 @@ export function StudioPage() {
                     ))}
                   </select>
                   <p className="text-xs leading-5 text-slate-500">选择已确认的模板套装，自动加载基准尺寸及裁片。</p>
+                  {templateSets.length === 0 && (
+                    <p className="text-xs text-amber-600">暂无可用的已确认套装，请先前往「管理套装」确认对照表。</p>
+                  )}
                 </div>
               </Panel>
 
@@ -1385,6 +1417,14 @@ export function StudioPage() {
           </form>
         </div>
       )}
+      <ResourceBar
+        textures={textures}
+        imageLayers={designLayers.filter((l) => l.type === "image")}
+        activeTextureId={activeTexture?.id}
+        onDeleteTexture={handleDeleteTexture}
+        onDeleteLayer={deleteLayer}
+        onSelectTexture={handleSelectTexture}
+      />
       <ToastNotice notice={notice} job={job} />
 
 

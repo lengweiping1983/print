@@ -46,7 +46,7 @@ export default function SizeTemplateDetailPage() {
     await api.patchTemplateSizePiece(setId, sizeId, pieceId, { piece_def_id: pieceDefId });
     const updated = await api.listTemplateSizePieces(setId, sizeId);
     setPieces(updated);
-    setNotice("关联已更新");
+    setNotice("关联已更新，对照表确认状态已重置，请重新确认。");
     setSaving(false);
   }
 
@@ -56,7 +56,7 @@ export default function SizeTemplateDetailPage() {
     setSaving(true);
     await api.deleteTemplateSizePiece(setId, sizeId, pieceId);
     await loadAll();
-    setNotice("裁片已删除");
+    setNotice("裁片已删除，对照表确认状态已重置，请重新确认。");
     setSaving(false);
   }
 
@@ -65,7 +65,7 @@ export default function SizeTemplateDetailPage() {
     setSaving(true);
     await api.patchTemplateSetPieceDef(setId, defId, { name });
     await loadAll();
-    setNotice("名称已更新");
+    setNotice("名称已更新，对照表确认状态已重置，请重新确认。");
     setSaving(false);
   }
 
@@ -74,7 +74,7 @@ export default function SizeTemplateDetailPage() {
     setSaving(true);
     await api.patchTemplateSetPieceDef(setId, defId, { piece_role });
     await loadAll();
-    setNotice("角色已更新");
+    setNotice("角色已更新，对照表确认状态已重置，请重新确认。");
     setSaving(false);
   }
 
@@ -87,7 +87,7 @@ export default function SizeTemplateDetailPage() {
       base_transform: { ...current, ...patch },
     });
     await loadAll();
-    setNotice("基准花位已更新");
+    setNotice("基准花位已更新，对照表确认状态已重置，请重新确认。");
     setSaving(false);
   }
 

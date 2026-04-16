@@ -381,6 +381,19 @@ def list_textures(project_id: str) -> list[dict]:
     return [_texture_out(row_to_dict(row)) for row in rows]
 
 
+@app.delete("/api/projects/{project_id}/textures/{texture_id}")
+def delete_texture(project_id: str, texture_id: str) -> dict:
+    ensure_project(project_id)
+    texture = get_texture_row(texture_id, project_id)
+    with connect() as con:
+        con.execute("delete from textures where id = ? and project_id = ?", (texture_id, project_id))
+    for key in ("source_path", "seamless_path", "design_canvas_path"):
+        path = texture.get(key)
+        if path:
+            storage_path(path).unlink(missing_ok=True)
+    return {"deleted": texture_id}
+
+
 @app.post("/api/projects/{project_id}/render/preview")
 def render_preview(project_id: str, texture_id: str = Form("")) -> dict:
     ensure_project(project_id)
@@ -431,7 +444,18 @@ def create_template_set(payload: TemplateSetCreate) -> dict:
 def list_template_sets() -> list[dict]:
     with connect() as con:
         rows = con.execute("select * from template_sets order by created_at desc").fetchall()
-    return [_template_set_out(row_to_dict(row)) for row in rows]
+    result: list[dict] = []
+    for row in rows:
+        try:
+            result.append(_template_set_out(row_to_dict(row)))
+        except Exception as exc:
+            logger.warning("计算套装 %s 的 mapping issues 失败: %s", row["id"], exc)
+            data = row_to_dict(row)
+            data["design_canvas"] = loads(data.get("design_canvas") or "{}", {})
+            data["has_mapping_issues"] = True
+            data["mapping_issue_details"] = {"系统": [f"服务端计算异常: {exc}"]}
+            result.append(data)
+    return result
 
 
 @app.get("/api/template-sets/{set_id}", response_model=TemplateSetOut)
@@ -1226,6 +1250,7 @@ def raw_size_template_geos(size_id: str) -> list[dict]:
 def _template_set_out(data: dict) -> dict:
     data["design_canvas"] = loads(data.get("design_canvas") or "{}", {})
     data["has_mapping_issues"] = compute_mapping_issues(data["id"])
+    data["mapping_issue_details"] = get_mapping_issue_details(data["id"])
     return data
 
 
@@ -1254,6 +1279,46 @@ def compute_mapping_issues(set_id: str) -> bool:
                     return True
                 seen.add(pid)
     return False
+
+
+def get_mapping_issue_details(set_id: str) -> dict[str, list[str]]:
+    details: dict[str, list[str]] = {}
+    with connect() as con:
+        set_row = con.execute("select mapping_confirmed_at from template_sets where id = ?", (set_id,)).fetchone()
+        if not set_row:
+            return details
+        def_count = con.execute("select count(*) from set_piece_defs where set_id = ?", (set_id,)).fetchone()[0]
+        def_rows = con.execute("select id, name from set_piece_defs where set_id = ?", (set_id,)).fetchall()
+        def_names = {row["id"]: row["name"] for row in def_rows}
+        size_rows = con.execute(
+            "select id, size_name from size_templates where set_id = ?", (set_id,)
+        ).fetchall()
+        for size_row in size_rows:
+            size_id = size_row["id"]
+            size_name = size_row["size_name"]
+            reasons: list[str] = []
+            pieces = con.execute(
+                "select piece_def_id from size_template_pieces where size_template_id = ?", (size_id,)
+            ).fetchall()
+            if len(pieces) != def_count:
+                reasons.append(f"裁片数量不匹配，基准定义有 {def_count} 个，当前尺寸有 {len(pieces)} 个")
+            seen = set()
+            duplicates = set()
+            empty = False
+            for p in pieces:
+                pid = p["piece_def_id"]
+                if not pid:
+                    empty = True
+                elif pid in seen:
+                    duplicates.add(pid)
+                seen.add(pid)
+            if empty:
+                reasons.append("存在未识别的裁片（未匹配到基准定义）")
+            for dup_id in sorted(duplicates, key=lambda x: (x is None, str(x))):
+                reasons.append(f"裁片「{def_names.get(dup_id, dup_id)}」被重复对应")
+            if reasons:
+                details[size_name] = reasons
+    return details
 
 
 def _size_template_out(data: dict) -> dict:

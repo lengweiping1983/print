@@ -240,6 +240,7 @@ export type TemplateSet = {
   design_canvas: Record<string, unknown>;
   has_mapping_issues: boolean;
   mapping_confirmed_at: string;
+  mapping_issue_details?: Record<string, string[]>;
   created_at: string;
   updated_at: string;
 };

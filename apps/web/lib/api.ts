@@ -95,6 +95,9 @@ export const api = {
   listTextures(projectId: string) {
     return request<Texture[]>(`/api/projects/${projectId}/textures`);
   },
+  deleteTexture(projectId: string, textureId: string) {
+    return request<{ deleted: string }>(`/api/projects/${projectId}/textures/${textureId}`, { method: "DELETE" });
+  },
   renderPreview(projectId: string, textureId = "") {
     const form = new FormData();
     form.set("texture_id", textureId);

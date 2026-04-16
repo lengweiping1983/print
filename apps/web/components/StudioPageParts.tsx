@@ -1,7 +1,8 @@
 "use client";
 
-import type { DesignCanvas, DesignLayer, Job, Piece, SafetyReportItem } from "@print-studio/shared-types";
+import type { DesignCanvas, DesignLayer, Job, Piece, SafetyReportItem, Texture } from "@print-studio/shared-types";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { PIECE_ROLE_LABELS } from "@/lib/labels";
 
 export function ToastNotice({ notice, job }: { notice: string; job: Job | null }) {
@@ -258,5 +259,150 @@ export function Range({
       <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
       {description && <span className="text-xs font-normal leading-5 text-slate-500">{description}</span>}
     </label>
+  );
+}
+
+function PreviewPortal({ url, rect }: { url: string; rect: DOMRect }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return createPortal(
+    <div
+      className="pointer-events-none fixed z-[60] rounded-lg border border-line bg-white p-1 shadow-lg"
+      style={{
+        left: rect.left + rect.width / 2,
+        top: rect.top - 8,
+        transform: "translate(-50%, -100%)",
+      }}
+    >
+      <img src={url} alt="" className="max-h-48 max-w-48 rounded-md object-contain" />
+    </div>,
+    document.body
+  );
+}
+
+function useHoverPreview() {
+  const [preview, setPreview] = useState<{ url: string; rect: DOMRect } | null>(null);
+  const refs = useState(() => new Map<string, HTMLDivElement>())[0];
+
+  const register = (id: string, url: string) => (el: HTMLDivElement | null) => {
+    if (!el) {
+      const prev = refs.get(id);
+      if (prev) refs.delete(id);
+      return;
+    }
+    if (refs.get(id) === el) return;
+    refs.set(id, el);
+    const enter = () => url && setPreview({ url, rect: el.getBoundingClientRect() });
+    const leave = () => setPreview((p) => (p && p.url === url ? null : p));
+    el.addEventListener("mouseenter", enter);
+    el.addEventListener("mouseleave", leave);
+  };
+
+  return { preview, register };
+}
+
+export function ResourceBar({
+  textures,
+  imageLayers,
+  activeTextureId,
+  onDeleteTexture,
+  onDeleteLayer,
+  onSelectTexture,
+}: {
+  textures: Texture[];
+  imageLayers: DesignLayer[];
+  activeTextureId?: string;
+  onDeleteTexture: (id: string) => void;
+  onDeleteLayer: (id: string) => void;
+  onSelectTexture: (id: string) => void;
+}) {
+  const { preview, register } = useHoverPreview();
+
+  if (textures.length === 0 && imageLayers.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-6 left-0 right-0 z-40 flex justify-center px-4">
+      <div className="w-full max-w-5xl rounded-xl border border-line bg-white px-4 py-3 shadow-panel">
+        <div className="flex items-start gap-4">
+          {textures.length > 0 && (
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-sm font-semibold text-slate-700">面料 ({textures.length})</div>
+              <div className="flex gap-2 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {textures.map((t) => {
+                  const thumb = t.design_canvas_url || t.seamless_url || t.source_url;
+                  const isActive = t.id === activeTextureId;
+                  return (
+                    <div key={t.id} ref={register(t.id, thumb || "")} className="relative shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onSelectTexture(t.id)}
+                        className={`block h-14 w-14 overflow-hidden rounded-lg border-2 ${isActive ? "border-action" : "border-transparent"} bg-slate-50`}
+                        title="切换面料"
+                      >
+                        {thumb ? (
+                          <img src={thumb} alt="面料" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">无图</div>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteTexture(t.id);
+                        }}
+                        className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs text-slate-500 shadow hover:text-coral ring-1 ring-line"
+                        title="删除"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {textures.length > 0 && imageLayers.length > 0 && <div className="w-px self-stretch bg-line" />}
+
+          {imageLayers.length > 0 && (
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 text-sm font-semibold text-slate-700">图片 ({imageLayers.length})</div>
+              <div className="flex gap-2 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {imageLayers.map((layer) => {
+                  const thumb = layer.source_url || "";
+                  return (
+                    <div key={layer.id} ref={register(layer.id, thumb)} className="relative shrink-0">
+                      <div className="h-14 w-14 overflow-hidden rounded-lg border border-line bg-slate-50">
+                        {thumb ? (
+                          <img src={thumb} alt={layer.name} className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">无图</div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteLayer(layer.id);
+                        }}
+                        className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs text-slate-500 shadow hover:text-coral ring-1 ring-line"
+                        title="删除"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      {preview && (
+        <PreviewPortal url={preview.url} rect={preview.rect} />
+      )}
+    </div>
   );
 }
