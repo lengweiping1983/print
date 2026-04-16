@@ -165,12 +165,14 @@ export const api = {
     });
   },
   listTemplateSizePieces(setId: string, sizeId: string) {
-    return request<SizeTemplatePiece[]>(`/api/template-sets/${setId}/sizes/${sizeId}/pieces?t=${Date.now()}`);
+    return request<SizeTemplatePiece[]>(`/api/template-sets/${setId}/sizes/${sizeId}/pieces?t=${Date.now()}`, {
+      headers: { "Cache-Control": "no-cache" },
+    });
   },
   patchTemplateSizePiece(setId: string, sizeId: string, pieceId: string, patch: { piece_def_id: string }) {
     return request<SizeTemplatePiece>(`/api/template-sets/${setId}/sizes/${sizeId}/pieces/${pieceId}`, {
       method: "PATCH",
-      headers: jsonHeaders,
+      headers: { ...jsonHeaders, "Cache-Control": "no-cache" },
       body: JSON.stringify(patch),
     });
   },

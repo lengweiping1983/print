@@ -60,7 +60,7 @@ from .schemas import (
     TextureOut,
 )
 from .template_ops import match_pieces_to_base, pick_default_base_size, size_sort_key
-from .texture_analysis import analyze_texture_fit_source
+from .texture_analysis import analyze_texture_fit_source, detect_repeat_period
 
 ALLOWED_UPLOAD_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".svg"}
 
@@ -1327,9 +1327,10 @@ def _fit_global_job(job_id: str, payload: dict) -> dict:
     pieces = raw_pieces(project_id)
     design_canvas = build_design_canvas_config(pieces, payload)
     design_canvas = carry_existing_design_canvas(project_id, design_canvas)
-    mappings = auto_map_pieces(pieces, design_canvas, payload.get("garment_type", "unknown"))
     design_path = project_dir(project_id) / "textures" / f"{texture['id']}_design_canvas.png"
     texture_source_path, texture_source, texture_warnings = resolve_texture_source(texture, payload.get("texture_source"))
+    design_canvas["texture_repeat"] = texture_repeat_for_fit(texture, texture_source_path)
+    mappings = auto_map_pieces(pieces, design_canvas, payload.get("garment_type", "unknown"))
     build_design_texture_canvas(texture_source_path, design_path, design_canvas, asset_paths(project_id))
     if payload.get("apply", True):
         apply_piece_mappings(project_id, pieces, mappings)
@@ -1683,6 +1684,23 @@ def create_default_texture(project_id: str) -> dict:
 
 def texture_file(texture: dict) -> Path:
     return storage_path(texture.get("design_canvas_path") or texture.get("seamless_path") or texture["source_path"])
+
+
+def texture_repeat_for_fit(texture: dict, texture_source_path: Path) -> dict:
+    analysis = loads(texture.get("analysis"), {})
+    repeat = analysis.get("repeat_period")
+    if isinstance(repeat, dict) and "has_repeat" in repeat:
+        return repeat
+
+    repeat = detect_repeat_period(texture_source_path)
+    analysis["repeat_period"] = repeat
+    texture["analysis"] = dumps(analysis)
+    with connect() as con:
+        con.execute(
+            "update textures set analysis = ?, version = version + 1 where id = ? and project_id = ?",
+            (dumps(analysis), texture["id"], texture["project_id"]),
+        )
+    return repeat
 
 
 def resolve_texture_source(texture: dict, requested_source: str | None) -> tuple[Path, str, list[str]]:

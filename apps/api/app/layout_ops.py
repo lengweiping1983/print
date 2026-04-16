@@ -97,6 +97,7 @@ def auto_map_pieces(
     boxes = [_box(piece) for piece in pieces]
     roles = _assign_roles(boxes)
     lanes = _role_lanes(design_canvas)
+    snap = _texture_snap_settings(design_canvas)
     lane_offsets: dict[str, float] = {}
     mapped: list[dict[str, Any]] = []
     for piece in pieces:
@@ -106,8 +107,13 @@ def auto_map_pieces(
         local_index = lane_offsets.get(role, 0)
         lane_offsets[role] = local_index + 1
         design_x, design_y = _place_in_lane(box, lane, local_index)
+        snapped = False
+        if snap:
+            design_x, design_y, snapped = _snap_to_texture_period(box, lane, design_x, design_y, snap)
         confidence = _role_confidence(role, box)
         note = _fit_note(role, confidence, garment_type)
+        if snapped:
+            note = f"{note} 已按纹理周期吸附取样坐标。"
         mapped.append(
             {
                 "id": box.id,
@@ -244,6 +250,54 @@ def _place_in_lane(box: PieceBox, lane: tuple[float, float, float, float], index
     step = max(24, min(box.width, lane_w / 4))
     row_step = max(24, min(box.height, lane_h / 3))
     return x + (index % 3) * step, y + int(index // 3) * row_step
+
+
+def _texture_snap_settings(canvas: dict[str, Any]) -> tuple[float, float] | None:
+    if not canvas.get("tile", True):
+        return None
+    angle = float(canvas.get("global_texture_angle", 0) or 0) % 180
+    if min(angle, 180 - angle) > 0.01:
+        return None
+    repeat = canvas.get("texture_repeat") or {}
+    if not repeat.get("has_repeat"):
+        return None
+    scale = max(0.05, float(canvas.get("texture_scale", 1) or 1))
+    period_x = float(repeat.get("period_x", 0) or 0) * scale
+    period_y = float(repeat.get("period_y", 0) or 0) * scale
+    period_x = period_x if period_x >= 4 else 0
+    period_y = period_y if period_y >= 4 else 0
+    if not period_x and not period_y:
+        return None
+    return period_x, period_y
+
+
+def _snap_to_texture_period(
+    box: PieceBox,
+    lane: tuple[float, float, float, float],
+    design_x: float,
+    design_y: float,
+    snap: tuple[float, float],
+) -> tuple[float, float, bool]:
+    period_x, period_y = snap
+    x, y, lane_w, lane_h = lane
+    max_x = max(x, x + lane_w - box.width)
+    max_y = max(y, y + lane_h - box.height)
+    next_x = _snap_value_in_range(design_x, period_x, x, max_x) if period_x else design_x
+    next_y = _snap_value_in_range(design_y, period_y, y, max_y) if period_y else design_y
+    snapped = abs(next_x - design_x) > 0.01 or abs(next_y - design_y) > 0.01
+    return next_x, next_y, snapped
+
+
+def _snap_value_in_range(value: float, period: float, minimum: float, maximum: float) -> float:
+    if period <= 0:
+        return value
+    low_index = math.ceil(minimum / period)
+    high_index = math.floor(maximum / period)
+    if low_index > high_index:
+        return min(max(value, minimum), maximum)
+    target_index = round(value / period)
+    snap_index = min(max(target_index, low_index), high_index)
+    return snap_index * period
 
 
 def _mirror_role(role: str, canvas: dict[str, Any]) -> bool:

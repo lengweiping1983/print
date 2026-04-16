@@ -63,26 +63,29 @@ export default function TemplateSetDetailPage() {
   async function refresh() {
     if (!setId) return;
     setLoading(true);
-    const [ts, szs, defs] = await Promise.all([
-      api.getTemplateSet(setId),
-      api.listTemplateSetSizes(setId),
-      api.listTemplateSetPieceDefs(setId),
-    ]);
-    setTemplateSet(ts);
-    setSizes(szs);
-    setPieceDefs(defs);
+    try {
+      const [ts, szs, defs] = await Promise.all([
+        api.getTemplateSet(setId),
+        api.listTemplateSetSizes(setId),
+        api.listTemplateSetPieceDefs(setId),
+      ]);
+      setTemplateSet(ts);
+      setSizes(szs);
+      setPieceDefs(defs);
 
-    const piecesMap: Record<string, SizeTemplatePiece[]> = {};
-    if (szs.length) {
-      const piecesResults = await Promise.all(
-        szs.map((s) => api.listTemplateSizePieces(setId, s.id).catch(() => [] as SizeTemplatePiece[]))
-      );
-      szs.forEach((s, idx) => {
-        piecesMap[s.id] = piecesResults[idx];
-      });
+      const piecesMap: Record<string, SizeTemplatePiece[]> = {};
+      if (szs.length) {
+        const piecesResults = await Promise.all(
+          szs.map((s) => api.listTemplateSizePieces(setId, s.id).catch(() => [] as SizeTemplatePiece[]))
+        );
+        szs.forEach((s, idx) => {
+          piecesMap[s.id] = piecesResults[idx];
+        });
+      }
+      setSizePiecesMap(piecesMap);
+    } finally {
+      setLoading(false);
     }
-    setSizePiecesMap(piecesMap);
-    setLoading(false);
   }
 
   async function handleFile(sizeName: string, file: File) {
@@ -225,13 +228,22 @@ export default function TemplateSetDetailPage() {
     }
     const defB = pieceB.piece_def_id;
     try {
-      const promises: Promise<unknown>[] = [
+      const promises: Promise<SizeTemplatePiece>[] = [
         api.patchTemplateSizePiece(setId, sizeId, pieceB.id, { piece_def_id: defId }),
       ];
       if (pieceA) {
         promises.push(api.patchTemplateSizePiece(setId, sizeId, pieceA.id, { piece_def_id: defB }));
       }
-      await Promise.all(promises);
+      const results = await Promise.all(promises);
+      // 立即局部更新状态，无需等待 refresh 即可看到变化
+      setSizePiecesMap((prev) => {
+        const next = { ...prev };
+        next[sizeId] = prev[sizeId].map((p) => {
+          const updated = results.find((r) => r.id === p.id);
+          return updated ? updated : p;
+        });
+        return next;
+      });
       await refresh();
       setNotice("对应关系已更新");
     } catch (err) {
@@ -250,7 +262,12 @@ export default function TemplateSetDetailPage() {
       return;
     }
     try {
-      await api.patchTemplateSizePiece(setId, sizeId, pieceA.id, { piece_def_id: "" });
+      const updated = await api.patchTemplateSizePiece(setId, sizeId, pieceA.id, { piece_def_id: "" });
+      setSizePiecesMap((prev) => {
+        const next = { ...prev };
+        next[sizeId] = prev[sizeId].map((p) => (p.id === updated.id ? updated : p));
+        return next;
+      });
       await refresh();
       setNotice("对应关系已清空");
     } catch (err) {
@@ -682,20 +699,29 @@ export default function TemplateSetDetailPage() {
             </div>
 
             <div className="flex items-center justify-end gap-3">
+              {!batchQueue.every((i) => i.status === "done" || i.status === "error") && (
+                <button
+                  onClick={() => {
+                    if (batchRunning) return;
+                    setBatchOpen(false);
+                    setBatchQueue([]);
+                  }}
+                  disabled={batchRunning}
+                  className="rounded px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  取消
+                </button>
+              )}
               <button
                 onClick={() => {
-                  if (batchRunning) return;
-                  setBatchOpen(false);
-                  setBatchQueue([]);
+                  if (batchQueue.every((i) => i.status === "done" || i.status === "error")) {
+                    setBatchOpen(false);
+                    setBatchQueue([]);
+                  } else {
+                    runBatchImport();
+                  }
                 }}
-                disabled={batchRunning}
-                className="rounded px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-              >
-                取消
-              </button>
-              <button
-                onClick={runBatchImport}
-                disabled={batchRunning || batchQueue.length === 0 || batchQueue.every((i) => i.status === "done" || i.status === "error")}
+                disabled={batchRunning || batchQueue.length === 0}
                 className="rounded bg-action px-4 py-2 text-sm font-semibold text-white hover:bg-action/90 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {batchRunning

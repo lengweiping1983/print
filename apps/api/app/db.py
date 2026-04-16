@@ -142,7 +142,7 @@ create table if not exists size_templates (
 create table if not exists size_template_pieces (
   id text primary key,
   size_template_id text not null,
-  piece_def_id text not null,
+  piece_def_id text not null default '',
   mask_path text not null,
   polygon text not null,
   bbox text not null,
@@ -157,8 +157,7 @@ create table if not exists size_template_pieces (
   transform text not null default '{}',
   created_at text not null,
   updated_at text not null,
-  foreign key(size_template_id) references size_templates(id),
-  foreign key(piece_def_id) references set_piece_defs(id)
+  foreign key(size_template_id) references size_templates(id)
 );
 """
 
@@ -265,6 +264,40 @@ def ensure_size_template_pieces_columns(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("pragma table_info(size_template_pieces)").fetchall()}
     if "transform" not in columns:
         con.execute("alter table size_template_pieces add column transform text not null default '{}'")
+    migrate_size_template_pieces_fk(con)
+
+
+def migrate_size_template_pieces_fk(con: sqlite3.Connection) -> None:
+    """移除 size_template_pieces 对 set_piece_defs 的外键约束，允许 piece_def_id 为空。"""
+    fks = con.execute("pragma foreign_key_list(size_template_pieces)").fetchall()
+    has_def_fk = any(row["table"] == "set_piece_defs" for row in fks)
+    if not has_def_fk:
+        return
+    con.execute("alter table size_template_pieces rename to size_template_pieces_old")
+    con.executescript("""
+    create table size_template_pieces (
+      id text primary key,
+      size_template_id text not null,
+      piece_def_id text not null default '',
+      mask_path text not null,
+      polygon text not null,
+      bbox text not null,
+      source_x integer not null,
+      source_y integer not null,
+      width integer not null,
+      height integer not null,
+      area integer not null,
+      centroid_x real not null,
+      centroid_y real not null,
+      scale_to_base real not null default 1.0,
+      transform text not null default '{}',
+      created_at text not null,
+      updated_at text not null,
+      foreign key(size_template_id) references size_templates(id)
+    );
+    insert into size_template_pieces select * from size_template_pieces_old;
+    drop table size_template_pieces_old;
+    """)
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:

@@ -154,6 +154,65 @@ def test_global_fit_updates_piece_transforms_and_preview() -> None:
         assert all(piece["transform"]["avoid_zones"] for piece in pieces)
 
 
+def test_global_fit_snaps_piece_regions_to_texture_repeat() -> None:
+    client = TestClient(app)
+    with client:
+        project = client.post("/api/projects", json={"name": "repeat snap"}).json()
+        mask = Image.new("RGBA", (260, 140), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(mask)
+        draw.rectangle((10, 12, 100, 120), fill=(255, 255, 255, 255))
+        draw.rectangle((150, 12, 240, 120), fill=(255, 255, 255, 255))
+        template_buf = BytesIO()
+        mask.save(template_buf, format="PNG")
+        template_buf.seek(0)
+        template = client.post(
+            f"/api/projects/{project['id']}/assets",
+            data={"kind": "template"},
+            files={"file": ("template.png", template_buf, "image/png")},
+        ).json()
+        import_template(client, project["id"], template["id"])
+
+        texture = Image.new("RGBA", (96, 96), (255, 255, 255, 255))
+        texture_draw = ImageDraw.Draw(texture)
+        for x in range(0, 96, 24):
+            texture_draw.rectangle((x, 0, x + 11, 95), fill=(20, 20, 20, 255))
+        texture_buf = BytesIO()
+        texture.save(texture_buf, format="PNG")
+        texture_buf.seek(0)
+        asset = client.post(
+            f"/api/projects/{project['id']}/assets",
+            data={"kind": "pattern"},
+            files={"file": ("stripe.png", texture_buf, "image/png")},
+        ).json()
+        texture_job = client.post(
+            f"/api/projects/{project['id']}/textures/generate",
+            json={"source_asset_id": asset["id"], "source_type": "pattern", "prompt": "重复条纹满版纹理", "provider": "local", "model": "local-copy"},
+        ).json()["job_id"]
+        texture_done = wait_job(client, texture_job)
+        texture_id = texture_done["output"]["texture"]["id"]
+        assert texture_done["output"]["texture"]["analysis"]["repeat_period"]["has_repeat"] is True
+
+        fit_job = client.post(
+            f"/api/projects/{project['id']}/textures/{texture_id}/fit-global",
+            json={"garment_type": "shirt", "texture_source": "source", "texture_scale": 1, "texture_angle": 0, "symmetry": "continuous"},
+        ).json()["job_id"]
+        fit_done = wait_job(client, fit_job)
+
+        assert fit_done["status"] == "succeeded"
+        assert fit_done["output"]["fit_preview_url"].endswith(".png")
+        repeat = fit_done["output"]["design_canvas"]["texture_repeat"]
+        assert repeat["has_repeat"] is True
+        assert abs(repeat["period_x"] - 24) <= 1
+
+        pieces = client.get(f"/api/projects/{project['id']}/pieces").json()
+        snapped_pieces = [piece for piece in pieces if "已按纹理周期吸附" in piece["transform"]["fit_note"]]
+        assert snapped_pieces
+        for piece in snapped_pieces:
+            design_x = piece["transform"]["design_x"]
+            assert abs((design_x / repeat["period_x"]) - round(design_x / repeat["period_x"])) < 0.02
+        assert all(piece["transform"]["mode"] == "global_canvas" for piece in pieces)
+
+
 def test_texture_generation_recommends_source_for_transparent_logo() -> None:
     client = TestClient(app)
     with client:

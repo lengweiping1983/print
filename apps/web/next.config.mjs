@@ -12,6 +12,9 @@ const nextConfig = {
   turbopack: {
     root: path.resolve(configDir, "../..")
   },
+  experimental: {
+    middlewareClientMaxBodySize: "50mb"
+  },
   async rewrites() {
     return [
       {

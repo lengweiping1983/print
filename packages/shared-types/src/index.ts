@@ -92,6 +92,15 @@ export type SafetyReportItem = {
   piece_role?: string;
 };
 
+export type TextureRepeat = {
+  has_repeat: boolean;
+  period_x: number;
+  period_y: number;
+  confidence_x: number;
+  confidence_y: number;
+  method: string;
+};
+
 export type DesignCanvas = {
   width: number;
   height: number;
@@ -109,6 +118,7 @@ export type DesignCanvas = {
   layers: DesignLayer[];
   safety_report: SafetyReportItem[];
   size_mapping: Record<string, unknown>;
+  texture_repeat?: TextureRepeat;
 };
 
 export type GlobalFitOptions = {

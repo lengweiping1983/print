@@ -259,6 +259,39 @@ function createLuminanceMaskCanvasSync(image: HTMLImageElement) {
   return canvas;
 }
 
+function createOutlineCanvas(source: CanvasImageSource, thickness = 2, color = "#e05252") {
+  const img = source as HTMLImageElement | HTMLCanvasElement;
+  const width = ("naturalWidth" in img ? img.naturalWidth || img.width : img.width) || 0;
+  const height = ("naturalHeight" in img ? img.naturalHeight || img.height : img.height) || 0;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(source, -thickness, -thickness, width + thickness * 2, height + thickness * 2);
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.drawImage(source, 0, 0, width, height);
+  return canvas;
+}
+
+function getMirroredTexture(image: HTMLImageElement, mirrorX: boolean, mirrorY: boolean) {
+  if (!mirrorX && !mirrorY) return image;
+  const w = image.naturalWidth || image.width || 1;
+  const h = image.naturalHeight || image.height || 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return image;
+  ctx.translate(mirrorX ? w : 0, mirrorY ? h : 0);
+  ctx.scale(mirrorX ? -1 : 1, mirrorY ? -1 : 1);
+  ctx.drawImage(image, 0, 0, w, h);
+  return canvas;
+}
+
 type Props = {
   pieces: Piece[];
   selectedPieceId: string;
@@ -308,6 +341,10 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
   const maskImage = useLoadedImage(selected?.mask_url || "");
   const selectedMaskKey = selected?.mask_url || "";
   const alphaMaskImage = useLuminanceMaskImage(maskImage, selectedMaskKey);
+  const outlineImage = useMemo(() => {
+    if (!alphaMaskImage) return null;
+    return createOutlineCanvas(alphaMaskImage, outlineWidth, "#e05252");
+  }, [alphaMaskImage, outlineWidth]);
   const [pieceZoom, setPieceZoom] = useState(1);
   const [stageWrapRef, stageWrapSize] = useElementSize<HTMLDivElement>();
   const stageWidth = Math.max(320, Math.round(stageWrapSize.width || 520));
@@ -360,6 +397,16 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
             {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
             {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
           </Layer>
+          {textureImage && selected && selectedMaskFrame && (
+            <DimmedTextureLayer
+              piece={selected}
+              textureImage={textureImage}
+              frame={selectedMaskFrame}
+              zoom={pieceZoom}
+              stageWidth={stageWidth}
+              stageHeight={stageHeight}
+            />
+          )}
           {textureImage && selected && alphaMaskImage && selectedMaskFrame && (
             <ClippedTextureLayer
               piece={selected}
@@ -371,20 +418,16 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
               onMove={(x, y) => onMovePiece(selected, x, y)}
             />
           )}
-          {showOutlines && (
+          {showOutlines && outlineImage && selectedMaskFrame && (
             <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
-              {selectedMaskFrame && (
-                <Rect
-                  x={selectedMaskFrame.x}
-                  y={selectedMaskFrame.y}
-                  width={selectedMaskFrame.width}
-                  height={selectedMaskFrame.height}
-                  stroke="#e05252"
-                  strokeWidth={outlineWidth}
-                  strokeScaleEnabled={false}
-                  listening={false}
-                />
-              )}
+              <KonvaImage
+                image={outlineImage}
+                x={selectedMaskFrame.x}
+                y={selectedMaskFrame.y}
+                width={selectedMaskFrame.width}
+                height={selectedMaskFrame.height}
+                listening={false}
+              />
             </Layer>
           )}
         </Stage>
@@ -481,8 +524,8 @@ export function LayoutPreview({
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <span className="rounded-md bg-mist px-2 py-1.5 text-sm text-slate-600">{pieces.length} 个裁片</span>
-          <ZoomButton label="排版" onClick={() => setPreviewMode("layout")} />
-          <ZoomButton label="设计画布" onClick={() => setPreviewMode("design")} />
+          <ZoomButton label="排版" active={previewMode === "layout"} onClick={() => setPreviewMode("layout")} />
+          <ZoomButton label="设计画布" active={previewMode === "design"} onClick={() => setPreviewMode("design")} />
           <ZoomButton label="-" onClick={() => updateCurrentZoom((zoom) => clampZoom(zoom - 0.05))} />
           <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(currentZoom * 100)}%</span>
           <ZoomButton label="+" onClick={() => updateCurrentZoom((zoom) => clampZoom(zoom + 0.05))} />
@@ -506,19 +549,7 @@ export function LayoutPreview({
                   onSelect={() => onSelectPiece(piece.id)}
                 />
               ))}
-            {showOutlines && (
-              <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
-                {pieces.map((piece) => (
-                  <PieceOutline
-                    key={`outline-${piece.id}`}
-                    piece={piece}
-                    selected={piece.id === selectedPieceId}
-                    outlineWidth={outlineWidth}
-                    onSelect={() => onSelectPiece(piece.id)}
-                  />
-                ))}
-              </Layer>
-            )}
+            {/* 排版视图下只显示裁片图片，不显示线框 */}
           </Stage>
         </div>
         <div className={previewMode === "design" ? "block shrink-0" : "hidden shrink-0"}>
@@ -860,11 +891,67 @@ function clampZoom(value: number) {
   return Math.min(2, Math.max(0.05, Number(value.toFixed(2))));
 }
 
-function ZoomButton({ label, onClick }: { label: string; onClick: () => void }) {
+function ZoomButton({ label, onClick, active }: { label: string; onClick: () => void; active?: boolean }) {
   return (
-    <button className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-ink ring-1 ring-line" onClick={onClick}>
+    <button
+      className={`rounded-lg px-3 py-1.5 text-sm font-semibold ring-1 ring-line ${
+        active ? "bg-ink text-white" : "bg-white text-ink"
+      }`}
+      onClick={onClick}
+    >
       {label}
     </button>
+  );
+}
+
+function DimmedTextureLayer({
+  piece,
+  textureImage,
+  frame,
+  zoom = 1,
+  stageWidth,
+  stageHeight
+}: {
+  piece: Piece;
+  textureImage: HTMLImageElement;
+  frame: { x: number; y: number; width: number; height: number };
+  zoom?: number;
+  stageWidth: number;
+  stageHeight: number;
+}) {
+  const frameScale = frame.width / Math.max(1, piece.width);
+  const globalMode = piece.transform.mode === "global_canvas";
+  const rotation = globalMode ? piece.transform.design_rotation ?? 0 : piece.transform.rotation;
+  const scale = globalMode
+    ? frame.width / Math.max(1, piece.transform.design_width ?? piece.width)
+    : piece.transform.scale * frameScale;
+  const imageCenterX = frame.x + frame.width / 2;
+  const imageCenterY = frame.y + frame.height / 2;
+  const patternSource = useMemo(
+    () => getMirroredTexture(textureImage, piece.transform.mirror_x || false, piece.transform.mirror_y || false),
+    [textureImage, piece.transform.mirror_x, piece.transform.mirror_y]
+  );
+  const sourceWidth = (patternSource as HTMLImageElement).naturalWidth || (patternSource as HTMLCanvasElement).width || textureImage.naturalWidth || 1;
+  const sourceHeight = (patternSource as HTMLImageElement).naturalHeight || (patternSource as HTMLCanvasElement).height || textureImage.naturalHeight || 1;
+  return (
+    <Layer scaleX={zoom} scaleY={zoom}>
+      <Rect
+        x={0}
+        y={0}
+        width={stageWidth}
+        height={stageHeight}
+        fillPatternImage={patternSource as unknown as HTMLImageElement}
+        fillPatternScaleX={scale}
+        fillPatternScaleY={scale}
+        fillPatternRotation={rotation}
+        fillPatternX={imageCenterX}
+        fillPatternY={imageCenterY}
+        fillPatternOffsetX={sourceWidth / 2}
+        fillPatternOffsetY={sourceHeight / 2}
+        opacity={0.25}
+        listening={false}
+      />
+    </Layer>
   );
 }
 

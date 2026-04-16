@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +104,8 @@ def analyze_texture_fit_source(
         if abs(delta) < 0.7:
             reasons.append("判断置信度不高，保守使用原图。")
 
+    repeat_period = detect_repeat_period(image_path, image_stats=image_stats)
+
     return {
         "recommendation": recommendation,
         "confidence": round(confidence, 3),
@@ -113,8 +116,55 @@ def analyze_texture_fit_source(
         "edge_similarity": round(edge_similarity, 4),
         "source_keywords": source_hits,
         "seamless_keywords": seamless_hits,
+        "repeat_period": repeat_period,
         "reasons": reasons,
     }
+
+
+def detect_repeat_period(image_path: Path, *, image_stats: dict[str, float] | None = None) -> dict[str, Any]:
+    result = {
+        "has_repeat": False,
+        "period_x": 0,
+        "period_y": 0,
+        "confidence_x": 0.0,
+        "confidence_y": 0.0,
+        "method": "autocorrelation_v1",
+    }
+    stats = image_stats or _image_stats(image_path)
+    if stats["transparent_ratio"] > 0.08 or stats["edge_alpha_ratio"] < 0.92:
+        return result
+
+    with Image.open(image_path).convert("RGBA") as img:
+        width, height = img.size
+        scale = min(1.0, 512 / max(width, height))
+        if scale < 1:
+            sample_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+            img = img.resize(sample_size, Image.Resampling.BOX)
+        else:
+            sample_size = (width, height)
+
+        gray = img.convert("L")
+        if ImageStat.Stat(gray).stddev[0] < 2.0:
+            return result
+
+        x_period, x_confidence = _detect_axis_period(_axis_projection(gray, "x"))
+        y_period, y_confidence = _detect_axis_period(_axis_projection(gray, "y"))
+
+    scale_x = sample_size[0] / max(1, width)
+    scale_y = sample_size[1] / max(1, height)
+    period_x = int(round(x_period / scale_x)) if x_period else 0
+    period_y = int(round(y_period / scale_y)) if y_period else 0
+
+    result.update(
+        {
+            "period_x": period_x,
+            "period_y": period_y,
+            "confidence_x": round(x_confidence, 3),
+            "confidence_y": round(y_confidence, 3),
+        }
+    )
+    result["has_repeat"] = bool(period_x or period_y)
+    return result
 
 
 def _image_stats(image_path: Path) -> dict[str, float]:
@@ -156,3 +206,56 @@ def _normalized_diff(a: Image.Image, b: Image.Image) -> float:
     diff = ImageChops.difference(a, b)
     stat = ImageStat.Stat(diff)
     return min(1.0, sum(stat.mean[:3]) / (3 * 255))
+
+
+def _axis_projection(image: Image.Image, axis: str) -> list[float]:
+    width, height = image.size
+    pixels = list(image.tobytes())
+    if axis == "x":
+        return [sum(pixels[y * width + x] for y in range(height)) / height for x in range(width)]
+    return [sum(pixels[y * width + x] for x in range(width)) / width for y in range(height)]
+
+
+def _detect_axis_period(values: Any) -> tuple[int, float]:
+    series = [float(value) for value in values]
+    if len(series) < 12:
+        return 0, 0.0
+    mean = sum(series) / len(series)
+    series = [value - mean for value in series]
+    variance = sum(value * value for value in series)
+    if variance <= 1e-6:
+        return 0, 0.0
+
+    min_period = 4
+    max_period = min(len(series) // 2, 256)
+    if max_period < min_period:
+        return 0, 0.0
+
+    scores: list[float] = []
+    for shift in range(1, max_period + 1):
+        left = series[:-shift]
+        right = series[shift:]
+        left_norm = math.sqrt(sum(value * value for value in left))
+        right_norm = math.sqrt(sum(value * value for value in right))
+        denom = left_norm * right_norm
+        scores.append(sum(a * b for a, b in zip(left, right)) / denom if denom > 1e-6 else 0.0)
+
+    best_period = 0
+    best_score = 0.0
+    for index in range(min_period - 1, len(scores)):
+        previous_score = scores[index - 1] if index > 0 else -1.0
+        current_score = scores[index]
+        next_score = scores[index + 1] if index + 1 < len(scores) else -1.0
+        shift = index + 1
+        if current_score >= 0.55 and current_score >= previous_score and current_score >= next_score:
+            best_period = shift
+            best_score = current_score
+            break
+
+    if not best_period:
+        index = max(range(min_period - 1, len(scores)), key=lambda item: scores[item])
+        if scores[index] >= 0.72:
+            best_period = index + 1
+            best_score = scores[index]
+
+    return best_period, max(0.0, min(1.0, best_score))
