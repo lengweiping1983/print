@@ -42,12 +42,14 @@ export default function TemplatesPage() {
           {sets.map((set) => (
             <div
               key={set.id}
-              className="relative rounded-lg border border-line bg-white p-4 shadow-panel transition hover:border-action"
+              className={`relative rounded-lg border bg-white p-4 shadow-panel transition hover:border-action ${set.has_mapping_issues ? "border-amber-400" : "border-line"}`}
             >
               <Link href={`/templates/${set.id}`} className="block">
                 <h2 className="flex items-center gap-2 text-lg font-semibold">
                   {set.name}
-                  {set.has_mapping_issues && <span className="text-coral" title="裁片对应关系异常">!</span>}
+                  {set.has_mapping_issues && (
+                    <span className="rounded bg-amber-100 px-2 py-0.5 text-sm font-semibold text-amber-700">待确认</span>
+                  )}
                 </h2>
                 <p className="text-sm text-slate-500">
                   {set.version_label ? `版本：${set.version_label}` : "无版本标签"} · {" "}
@@ -56,7 +58,7 @@ export default function TemplatesPage() {
                 <div className="mt-2 flex items-center gap-2">
                   <p className="text-xs text-slate-400">基准尺寸：{set.base_size_template_id ? "已设置" : "未设置"}</p>
                   {set.has_mapping_issues && (
-                    <span className="rounded bg-coral/10 px-1.5 py-0.5 text-[10px] font-medium text-coral">裁片对应待确认</span>
+                    <span className="rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">裁片对应待确认</span>
                   )}
                 </div>
               </Link>

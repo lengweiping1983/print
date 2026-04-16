@@ -1,6 +1,6 @@
 "use client";
 
-import type { DesignLayer, Job, Piece, SafetyReportItem } from "@print-studio/shared-types";
+import type { DesignCanvas, DesignLayer, Job, Piece, SafetyReportItem } from "@print-studio/shared-types";
 import { useEffect, useState } from "react";
 import { PIECE_ROLE_LABELS } from "@/lib/labels";
 
@@ -37,26 +37,44 @@ export function ToastNotice({ notice, job }: { notice: string; job: Job | null }
   );
 }
 
+function SliderField({ label, value, min, max, step = 1, onChange, format }: { label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void; format?: (v: number) => string }) {
+  return (
+    <label className="grid gap-1 text-xs font-semibold">
+      <span className="flex justify-between">
+        {label}
+        <strong>{format ? format(value) : Number(value).toFixed(step < 1 ? 2 : 0)}</strong>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full accent-action"
+      />
+    </label>
+  );
+}
+
 export function LayerEditor({
   layer,
   pieces,
+  designCanvas,
   onChange,
   onDelete
 }: {
   layer: DesignLayer;
   pieces: Piece[];
+  designCanvas?: DesignCanvas | null;
   onChange: (update: Partial<DesignLayer>) => void;
   onDelete: () => void;
 }) {
   const roles = Array.from(new Set(pieces.map((piece) => piece.transform.piece_role).filter(Boolean))) as string[];
-  const layerImageUrl = layer.source_url || "";
+  const canvasW = designCanvas?.width ?? 2400;
+  const canvasH = designCanvas?.height ?? 1600;
   return (
     <div className="grid gap-3 rounded-lg border border-line p-3">
-      {layer.type === "image" && layerImageUrl && (
-        <div className="flex justify-center rounded-lg border border-line bg-white p-2">
-          <img className="max-h-32 rounded-md object-contain" src={layerImageUrl} alt="" />
-        </div>
-      )}
       <label className="grid gap-1 text-sm font-semibold">
         <span>图层名称</span>
         <input className="rounded-lg border border-line px-3 py-2" value={layer.name} onChange={(event) => onChange({ name: event.target.value })} />
@@ -68,12 +86,12 @@ export function LayerEditor({
         </label>
       )}
       <div className="grid grid-cols-2 gap-2">
-        <NumberField label="X" value={layer.x} onChange={(x) => onChange({ x })} />
-        <NumberField label="Y" value={layer.y} onChange={(y) => onChange({ y })} />
-        <NumberField label="宽" value={layer.width} onChange={(width) => onChange({ width })} />
-        <NumberField label="高" value={layer.height} onChange={(height) => onChange({ height })} />
-        <NumberField label="旋转" value={layer.rotation} onChange={(rotation) => onChange({ rotation })} />
-        <NumberField label="透明度" value={layer.opacity} step={0.05} onChange={(opacity) => onChange({ opacity })} />
+        <SliderField label="X" value={layer.x} min={-Math.max(0, Math.round(layer.width))} max={canvasW} onChange={(x) => onChange({ x })} />
+        <SliderField label="Y" value={layer.y} min={-Math.max(0, Math.round(layer.height))} max={canvasH} onChange={(y) => onChange({ y })} />
+        <SliderField label="宽" value={layer.width} min={20} max={Math.round(canvasW * 1.5)} onChange={(width) => onChange({ width })} />
+        <SliderField label="高" value={layer.height} min={20} max={Math.round(canvasH * 1.5)} onChange={(height) => onChange({ height })} />
+        <SliderField label="旋转" value={layer.rotation} min={-180} max={180} step={1} onChange={(rotation) => onChange({ rotation })} />
+        <SliderField label="透明度" value={layer.opacity} min={0} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(opacity) => onChange({ opacity })} />
       </div>
       {layer.type === "text" && (
         <div className="grid grid-cols-2 gap-2">
@@ -103,11 +121,19 @@ export function LayerEditor({
         </select>
       </label>
       <div className="grid grid-cols-2 gap-2 text-sm">
-        <label className="rounded-lg border border-line p-2">
-          <input type="checkbox" checked={layer.visible} onChange={(event) => onChange({ visible: event.target.checked })} /> 显示
+        <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-2">
+          <input type="checkbox" className="peer sr-only" checked={layer.visible} onChange={(event) => onChange({ visible: event.target.checked })} />
+          <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-jade">
+            <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
+          </span>
+          <span className="font-medium">显示</span>
         </label>
-        <label className="rounded-lg border border-line p-2">
-          <input type="checkbox" checked={layer.locked} onChange={(event) => onChange({ locked: event.target.checked })} /> 锁定
+        <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-line p-2">
+          <input type="checkbox" className="peer sr-only" checked={layer.locked} onChange={(event) => onChange({ locked: event.target.checked })} />
+          <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-action">
+            <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
+          </span>
+          <span className="font-medium">锁定</span>
         </label>
       </div>
       <button className="rounded-lg bg-white px-3 py-2 font-semibold text-coral ring-1 ring-line" onClick={onDelete}>

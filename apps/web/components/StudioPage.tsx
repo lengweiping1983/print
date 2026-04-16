@@ -280,6 +280,7 @@ export function StudioPage() {
       try {
         const [restored, sets] = await Promise.all([loadInitialProject(), api.listTemplateSets()]);
         if (!active) return;
+        const availableSets = sets.filter((s) => s.mapping_confirmed_at && !s.has_mapping_issues);
         setProject(restored.project);
         setDesignCanvas(readDesignCanvas(restored.project));
         setPieces(restored.pieces);
@@ -287,7 +288,7 @@ export function StudioPage() {
         setGlobalFitDefaults({ texture_scale: 1, texture_angle: 0, texture_offset_x: 0, texture_offset_y: 0 });
         setTextures(restored.textures);
         setSelectedPieceId(restored.pieces[0]?.id ?? "");
-        setTemplateSets(sets);
+        setTemplateSets(availableSets);
         localStorage.setItem(LAST_PROJECT_KEY, restored.project.id);
         setNotice(restored.created ? "项目已创建，请在左侧选择模板开始打样。" : "已恢复最近的裁片项目。");
       } catch (error) {
@@ -673,7 +674,8 @@ export function StudioPage() {
 
   async function openTemplateDialog() {
     const sets = await api.listTemplateSets();
-    setTemplateSets(sets);
+    const availableSets = sets.filter((s) => s.mapping_confirmed_at && !s.has_mapping_issues);
+    setTemplateSets(availableSets);
     setShowTemplateDialog(true);
     setSelectedSetId("");
     setSelectedSetSizes([]);
@@ -1097,6 +1099,7 @@ export function StudioPage() {
                   <LayerEditor
                     layer={selectedLayer}
                     pieces={pieces}
+                    designCanvas={designCanvas}
                     onChange={(update) => patchLayer(selectedLayer.id, update)}
                     onDelete={() => deleteLayer(selectedLayer.id)}
                   />
@@ -1137,7 +1140,7 @@ export function StudioPage() {
           <div className="grid grid-cols-[128px_minmax(0,1fr)] gap-4 max-[980px]:grid-cols-1">
             <div className="max-h-[760px] space-y-2 overflow-auto pr-1">
               <p className="m-0 text-xs text-slate-500">裁片数量：{pieces.length}</p>
-              {pieces.length === 0 && <p className="text-xs leading-5 text-slate-500">上传透明模板后会显示裁片。</p>}
+              {pieces.length === 0 && <p className="text-xs leading-5 text-slate-500">请先选择套装！</p>}
               {pieces.map((piece) => {
                 const isLinked = Boolean(piece.mirror_of);
                 const sourceName = isLinked ? pieces.find((p) => p.id === piece.mirror_of)?.name || "" : "";

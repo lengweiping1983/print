@@ -179,7 +179,7 @@ export default function TemplateSetDetailPage() {
     if (!confirm(`确定删除 ${sizeName} 尺寸模板吗？`)) return;
     await api.deleteTemplateSetSize(setId, sizeId);
     await refresh();
-    setNotice(`${sizeName} 已删除`);
+    setNotice(`${sizeName} 已删除，请重新确认对照表后才能在项目中使用。`);
   }
 
   async function updateDefName(defId: string, name: string) {

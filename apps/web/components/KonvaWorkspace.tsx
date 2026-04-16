@@ -493,7 +493,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
       <Stage width={stageWidth} height={stageHeight}>
         <Layer>
           <Rect x={0} y={0} width={stageWidth} height={stageHeight} fill="#ffffff" />
-          {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
+          {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先选择套装！" fill="#64748b" fontSize={18} />}
           {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成面料" fill="#64748b" fontSize={18} />}
         </Layer>
         {textureImage && displayPiece && selectedMaskFrame && (
@@ -808,7 +808,12 @@ export function LayoutPreview({
           <ZoomButton label="100%" onClick={() => updateCurrentZoom(() => 1)} />
         </div>
       </div>
-      <div ref={previewWrapRef} className="relative flex max-h-[760px] min-h-[360px] justify-center overflow-auto rounded-lg border border-line bg-white">
+      <div ref={previewWrapRef} className="relative flex max-h-[640px] min-h-[360px] justify-center overflow-auto rounded-lg border border-line bg-white">
+        {pieces.length === 0 && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white text-lg text-slate-500">
+            请先选择套装！
+          </div>
+        )}
         <div className={previewMode === "layout" ? "block shrink-0" : "hidden shrink-0"}>
           <Stage width={Math.ceil(layoutBounds.width * layoutZoom)} height={Math.ceil(layoutBounds.height * layoutZoom)}>
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
