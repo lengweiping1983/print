@@ -165,6 +165,10 @@ export type GlobalFitOptions = {
   anchor: string;
   symmetry: "continuous" | "mirror";
   texture_source: "source" | "seamless";
+  safe_zone_inset_x_ratio?: number;
+  safe_zone_inset_y_ratio?: number;
+  avoid_zone_seam_ratio?: number;
+  avoid_zone_min_px?: number;
 };
 
 export type Piece = {

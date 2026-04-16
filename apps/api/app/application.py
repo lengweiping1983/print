@@ -1399,6 +1399,9 @@ def _fit_global_job(job_id: str, payload: dict) -> dict:
     pieces = raw_pieces(project_id)
     design_canvas = build_design_canvas_config(pieces, payload)
     design_canvas = carry_existing_design_canvas(project_id, design_canvas)
+    for key in ("safe_zone_inset_x_ratio", "safe_zone_inset_y_ratio", "avoid_zone_seam_ratio", "avoid_zone_min_px"):
+        if key in payload:
+            design_canvas[key] = payload[key]
     design_path = project_dir(project_id) / "textures" / f"{texture['id']}_design_canvas.png"
     texture_source_path, texture_source, texture_warnings = resolve_texture_source(texture, payload.get("texture_source"))
     fit_analysis = texture_fit_analysis_for_fit(texture, texture_source_path)
@@ -1596,6 +1599,9 @@ def merge_project_design_canvas(project_id: str, patch: dict) -> dict:
 def carry_existing_design_canvas(project_id: str, design_canvas: dict) -> dict:
     project = get_project_dict(project_id)
     current = dict((project.get("export_config") or {}).get("design_canvas") or {})
+    for key in ("safe_zone_inset_x_ratio", "safe_zone_inset_y_ratio", "avoid_zone_seam_ratio", "avoid_zone_min_px"):
+        if key in current:
+            design_canvas[key] = current[key]
     if current.get("layers") and not design_canvas.get("layers"):
         design_canvas["layers"] = current["layers"]
     if current.get("size_mapping"):

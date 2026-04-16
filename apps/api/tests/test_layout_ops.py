@@ -128,6 +128,10 @@ def test_safe_and_avoid_zone_defaults_match_legacy_ratios(tmp_path: Path) -> Non
     pieces = [_rect_piece(tmp_path, "piece", 200, 100, 20000)]
     canvas = build_design_canvas_config(pieces)
 
+    assert canvas["safe_zone_inset_x_ratio"] == 0.16
+    assert canvas["safe_zone_inset_y_ratio"] == 0.14
+    assert canvas["avoid_zone_seam_ratio"] == 0.06
+    assert canvas["avoid_zone_min_px"] == 8
     mapped = auto_map_pieces(pieces, canvas, "unknown")
     safe = mapped[0]["safe_zones"][0]
     avoid = mapped[0]["avoid_zones"][0]
@@ -138,13 +142,22 @@ def test_safe_and_avoid_zone_defaults_match_legacy_ratios(tmp_path: Path) -> Non
 
 def test_safe_and_avoid_zones_follow_canvas_ratios(tmp_path: Path) -> None:
     pieces = [_rect_piece(tmp_path, "piece", 200, 100, 20000)]
-    canvas = {
-        **build_design_canvas_config(pieces),
-        "safe_zone_inset_x_ratio": 0.1,
-        "safe_zone_inset_y_ratio": 0.2,
-        "avoid_zone_seam_ratio": 0.12,
-        "avoid_zone_min_px": 5,
-    }
+    canvas = build_design_canvas_config(
+        pieces,
+        {
+            "canvas_width": 1600,
+            "canvas_height": 1200,
+            "safe_zone_inset_x_ratio": 0.1,
+            "safe_zone_inset_y_ratio": 0.2,
+            "avoid_zone_seam_ratio": 0.12,
+            "avoid_zone_min_px": 5,
+        },
+    )
+
+    assert canvas["safe_zone_inset_x_ratio"] == 0.1
+    assert canvas["safe_zone_inset_y_ratio"] == 0.2
+    assert canvas["avoid_zone_seam_ratio"] == 0.12
+    assert canvas["avoid_zone_min_px"] == 5
 
     mapped = auto_map_pieces(pieces, canvas, "unknown")
     safe = mapped[0]["safe_zones"][0]

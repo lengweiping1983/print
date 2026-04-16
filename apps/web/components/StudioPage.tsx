@@ -21,6 +21,10 @@ const LayoutPreview = dynamic(() => import("./KonvaWorkspace").then((mod) => mod
 
 const LAST_PROJECT_KEY = "print-studio:last-project-id";
 type TextureSourceType = "pattern" | "garment_photo" | "ai" | "library";
+const DEFAULT_SAFE_ZONE_INSET_X_RATIO = 0.16;
+const DEFAULT_SAFE_ZONE_INSET_Y_RATIO = 0.14;
+const DEFAULT_AVOID_ZONE_SEAM_RATIO = 0.06;
+const DEFAULT_AVOID_ZONE_MIN_PX = 8;
 
 const emptyTransform: PieceTransform = {
   offset_x: 0,
@@ -53,6 +57,10 @@ type StudioState = {
   globalTextureScale: number;
   globalOffsetX: number;
   globalOffsetY: number;
+  safeZoneInsetXRatio: number;
+  safeZoneInsetYRatio: number;
+  avoidZoneSeamRatio: number;
+  avoidZoneMinPx: number;
   globalSymmetry: "continuous" | "mirror";
   globalAnchor: string;
   designCanvas: DesignCanvas | null;
@@ -98,6 +106,10 @@ const initialStudioState: StudioState = {
   globalTextureScale: 1,
   globalOffsetX: 0,
   globalOffsetY: 0,
+  safeZoneInsetXRatio: DEFAULT_SAFE_ZONE_INSET_X_RATIO,
+  safeZoneInsetYRatio: DEFAULT_SAFE_ZONE_INSET_Y_RATIO,
+  avoidZoneSeamRatio: DEFAULT_AVOID_ZONE_SEAM_RATIO,
+  avoidZoneMinPx: DEFAULT_AVOID_ZONE_MIN_PX,
   globalSymmetry: "continuous",
   globalAnchor: "front_center",
   designCanvas: null,
@@ -143,6 +155,10 @@ export function StudioPage() {
     globalTextureScale,
     globalOffsetX,
     globalOffsetY,
+    safeZoneInsetXRatio,
+    safeZoneInsetYRatio,
+    avoidZoneSeamRatio,
+    avoidZoneMinPx,
     globalSymmetry,
     globalAnchor,
     designCanvas,
@@ -180,6 +196,10 @@ export function StudioPage() {
   const setGlobalTextureScale = (value: SetStateAction<number>) => setField("globalTextureScale", value);
   const setGlobalOffsetX = (value: SetStateAction<number>) => setField("globalOffsetX", value);
   const setGlobalOffsetY = (value: SetStateAction<number>) => setField("globalOffsetY", value);
+  const setSafeZoneInsetXRatio = (value: SetStateAction<number>) => setField("safeZoneInsetXRatio", value);
+  const setSafeZoneInsetYRatio = (value: SetStateAction<number>) => setField("safeZoneInsetYRatio", value);
+  const setAvoidZoneSeamRatio = (value: SetStateAction<number>) => setField("avoidZoneSeamRatio", value);
+  const setAvoidZoneMinPx = (value: SetStateAction<number>) => setField("avoidZoneMinPx", value);
   const setGlobalSymmetry = (value: SetStateAction<StudioState["globalSymmetry"]>) => setField("globalSymmetry", value);
   const setGlobalAnchor = (value: SetStateAction<string>) => setField("globalAnchor", value);
   const setDesignCanvas = (value: SetStateAction<DesignCanvas | null>) => setField("designCanvas", value);
@@ -314,6 +334,7 @@ export function StudioPage() {
     .join("|");
   const selectedLayer = designLayers.find((layer) => layer.id === selectedLayerId) || designLayers[0] || null;
   const safetyReport = designCanvas?.safety_report || [];
+  const manualPositionCount = pieces.filter((piece) => !piece.mirror_of && piece.transform.position_confirmed).length;
 
   useEffect(() => {
     if (!layersDirty || !project || !activeTexture || autoRenderingDesign) return;
@@ -325,6 +346,20 @@ export function StudioPage() {
       if (layerRenderTimerRef.current) clearTimeout(layerRenderTimerRef.current);
     };
   }, [layersDirty, project?.id, activeTexture?.id, autoRenderingDesign, designLayerSignature]);
+
+  useEffect(() => {
+    if (!designCanvas) {
+      setSafeZoneInsetXRatio(DEFAULT_SAFE_ZONE_INSET_X_RATIO);
+      setSafeZoneInsetYRatio(DEFAULT_SAFE_ZONE_INSET_Y_RATIO);
+      setAvoidZoneSeamRatio(DEFAULT_AVOID_ZONE_SEAM_RATIO);
+      setAvoidZoneMinPx(DEFAULT_AVOID_ZONE_MIN_PX);
+      return;
+    }
+    setSafeZoneInsetXRatio(readNumber(designCanvas.safe_zone_inset_x_ratio, DEFAULT_SAFE_ZONE_INSET_X_RATIO));
+    setSafeZoneInsetYRatio(readNumber(designCanvas.safe_zone_inset_y_ratio, DEFAULT_SAFE_ZONE_INSET_Y_RATIO));
+    setAvoidZoneSeamRatio(readNumber(designCanvas.avoid_zone_seam_ratio, DEFAULT_AVOID_ZONE_SEAM_RATIO));
+    setAvoidZoneMinPx(readNumber(designCanvas.avoid_zone_min_px, DEFAULT_AVOID_ZONE_MIN_PX));
+  }, [designCanvas]);
 
   async function upload(kind: string, file: File) {
     if (!project) return;
@@ -400,7 +435,11 @@ export function StudioPage() {
         mirror: globalSymmetry === "mirror",
         symmetry: globalSymmetry,
         anchor: globalAnchor,
-        texture_source: textureViewMode
+        texture_source: textureViewMode,
+        safe_zone_inset_x_ratio: safeZoneInsetXRatio,
+        safe_zone_inset_y_ratio: safeZoneInsetYRatio,
+        avoid_zone_seam_ratio: avoidZoneSeamRatio,
+        avoid_zone_min_px: avoidZoneMinPx
       };
       const created = await api.fitGlobalTexture(project.id, activeTexture.id, options);
       const done = await waitForJob(created.job_id, setJob);
@@ -464,6 +503,16 @@ export function StudioPage() {
       setSelectedLayerId(rollbackSelectedLayerId);
       setNotice(readError(error));
     }
+  }
+
+  function updateFitZoneSetting(key: "safe_zone_inset_x_ratio" | "safe_zone_inset_y_ratio" | "avoid_zone_seam_ratio" | "avoid_zone_min_px", value: number) {
+    const nextValue = key === "avoid_zone_min_px" ? clampNumber(value, 0, 200) : clampNumber(value, 0, 0.45);
+    if (key === "safe_zone_inset_x_ratio") setSafeZoneInsetXRatio(nextValue);
+    if (key === "safe_zone_inset_y_ratio") setSafeZoneInsetYRatio(nextValue);
+    if (key === "avoid_zone_seam_ratio") setAvoidZoneSeamRatio(nextValue);
+    if (key === "avoid_zone_min_px") setAvoidZoneMinPx(nextValue);
+    if (!designCanvas) return;
+    void saveDesignCanvas({ ...designCanvas, [key]: nextValue }, layersDirty);
   }
 
   async function addImageLayer() {
@@ -860,6 +909,63 @@ export function StudioPage() {
                 </select>
                 <span className="text-xs leading-5 text-slate-500">决定 logo、鱼、文字等主体优先对齐的位置；满版纹理影响较小。</span>
               </label>
+              <div className="grid gap-2 rounded-lg border border-line bg-white p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold">安全区与缝份</span>
+                  <span className="text-xs text-slate-500">高级参数</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="grid gap-1">
+                    <span className="text-xs font-semibold text-slate-600">安全区 X 内缩</span>
+                    <input
+                      className="rounded-lg border border-line px-3 py-2"
+                      type="number"
+                      min={0}
+                      max={0.45}
+                      step={0.01}
+                      value={safeZoneInsetXRatio}
+                      onChange={(event) => updateFitZoneSetting("safe_zone_inset_x_ratio", Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-xs font-semibold text-slate-600">安全区 Y 内缩</span>
+                    <input
+                      className="rounded-lg border border-line px-3 py-2"
+                      type="number"
+                      min={0}
+                      max={0.45}
+                      step={0.01}
+                      value={safeZoneInsetYRatio}
+                      onChange={(event) => updateFitZoneSetting("safe_zone_inset_y_ratio", Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-xs font-semibold text-slate-600">缝份避让比例</span>
+                    <input
+                      className="rounded-lg border border-line px-3 py-2"
+                      type="number"
+                      min={0}
+                      max={0.45}
+                      step={0.01}
+                      value={avoidZoneSeamRatio}
+                      onChange={(event) => updateFitZoneSetting("avoid_zone_seam_ratio", Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-xs font-semibold text-slate-600">最小避让像素</span>
+                    <input
+                      className="rounded-lg border border-line px-3 py-2"
+                      type="number"
+                      min={0}
+                      max={200}
+                      step={1}
+                      value={avoidZoneMinPx}
+                      onChange={(event) => updateFitZoneSetting("avoid_zone_min_px", Number(event.target.value))}
+                    />
+                  </label>
+                </div>
+                <p className="m-0 text-xs leading-5 text-slate-500">默认值为 0.16 / 0.14 / 0.06 / 8，调整后下次自动适配会重新计算裁片安全区和缝份避让区。</p>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line" onClick={handleAutoMap}>
                   重新识别部位
@@ -872,6 +978,11 @@ export function StudioPage() {
               <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
                 已启用全局坐标：{globalPieceCount}/{primaryPieceCount} 个主裁片；{linkedPieceCount} 个关联裁片由源裁片派生，不参与全局定位。
               </p>
+              {manualPositionCount > 0 && (
+                <p className="m-0 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                  {manualPositionCount} 个裁片已锁定手动位置，自动适配会保留它们的取样坐标；重置当前裁片后可重新交给系统自动排布。
+                </p>
+              )}
             </div>
           </Panel>
 
@@ -1204,6 +1315,16 @@ export function StudioPage() {
 
 function readError(error: unknown) {
   return error instanceof Error ? error.message.split("\n")[0] : "操作失败，请检查后端日志。";
+}
+
+function readNumber(value: unknown, fallback: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
 }
 
 function readAnalysisReason(analysis: Record<string, unknown>) {

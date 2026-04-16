@@ -121,6 +121,10 @@ class GlobalFitRequest(BaseModel):
     anchor: str = "front_center"
     symmetry: Literal["continuous", "mirror"] = "continuous"
     texture_source: Literal["source", "seamless"] = "source"
+    safe_zone_inset_x_ratio: float = 0.16
+    safe_zone_inset_y_ratio: float = 0.14
+    avoid_zone_seam_ratio: float = 0.06
+    avoid_zone_min_px: float = 8
 
 
 class DesignCanvasPatch(BaseModel):

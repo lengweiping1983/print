@@ -76,6 +76,10 @@ def build_design_canvas_config(
         "mirror": bool(payload.get("mirror", False)),
         "symmetry": payload.get("symmetry") or "continuous",
         "anchor": payload.get("anchor") or "front_center",
+        "safe_zone_inset_x_ratio": _ratio_setting(payload, "safe_zone_inset_x_ratio", 0.16),
+        "safe_zone_inset_y_ratio": _ratio_setting(payload, "safe_zone_inset_y_ratio", 0.14),
+        "avoid_zone_seam_ratio": _ratio_setting(payload, "avoid_zone_seam_ratio", 0.06),
+        "avoid_zone_min_px": _positive_float_setting(payload, "avoid_zone_min_px", 8),
         "margin": margin,
         "design_anchors": {
             "front_center": {"x": width * 0.3, "y": height * 0.35},
