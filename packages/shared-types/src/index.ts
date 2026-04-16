@@ -286,3 +286,12 @@ export type SizeTemplatePiece = {
   created_at: string;
   updated_at: string;
 };
+
+export type FabricPrompt = {
+  id: string;
+  code: string;
+  name: string;
+  scenarios: string;
+  prompt: string;
+  sort_order: number;
+};

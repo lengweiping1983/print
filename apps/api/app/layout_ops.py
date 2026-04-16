@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from pathlib import Path
 from typing import Any
+
+from PIL import Image
 
 from .config import MAX_IMAGE_PIXELS
 
@@ -28,6 +31,7 @@ class PieceBox:
     area: int
     source_x: int
     source_y: int
+    mask_path: str = ""
 
     @property
     def aspect(self) -> float:
@@ -112,20 +116,24 @@ def auto_map_pieces(
             design_x, design_y, snapped = _snap_to_texture_period(box, lane, design_x, design_y, snap)
         confidence = _role_confidence(role, box)
         note = _fit_note(role, confidence, garment_type)
+        rotation, orientation_note = _orientation_rotation(box, role)
         if snapped:
             note = f"{note} 已按纹理周期吸附取样坐标。"
+        if orientation_note:
+            note = f"{note} {orientation_note}"
         mapped.append(
             {
                 "id": box.id,
                 "piece_role": role,
                 "role_label": ROLE_LABELS.get(role, ROLE_LABELS["unknown"]),
                 "grainline_angle": float(design_canvas.get("global_texture_angle", 0) or 0),
+                "orientation_rotation": rotation,
                 "design_region": {
                     "x": round(design_x, 2),
                     "y": round(design_y, 2),
                     "width": box.width,
                     "height": box.height,
-                    "rotation": 0,
+                    "rotation": rotation,
                     "mirror_x": _mirror_role(role, design_canvas),
                     "mirror_y": False,
                 },
@@ -136,6 +144,8 @@ def auto_map_pieces(
                 "fit_note": note,
             }
         )
+    if snap:
+        _apply_seam_alignment(mapped, snap)
     return mapped
 
 
@@ -152,6 +162,7 @@ def merge_mapping_into_transform(transform: dict[str, Any], mapping: dict[str, A
             "design_width": region["width"],
             "design_height": region["height"],
             "design_rotation": region["rotation"],
+            "rotation": region["rotation"],
             "mirror_x": bool(region["mirror_x"]),
             "mirror_y": bool(region["mirror_y"]),
             "grainline_angle": mapping["grainline_angle"],
@@ -175,6 +186,7 @@ def _box(piece: dict[str, Any]) -> PieceBox:
         area=int(piece.get("area", 0) or 0),
         source_x=int(piece.get("source_x", 0) or 0),
         source_y=int(piece.get("source_y", 0) or 0),
+        mask_path=str(piece.get("mask_path") or ""),
     )
 
 
@@ -312,6 +324,52 @@ def _role_confidence(role: str, box: PieceBox) -> float:
     return 0.78
 
 
+def _orientation_rotation(box: PieceBox, role: str) -> tuple[int, str]:
+    if role not in {"front_left", "front_right", "back"}:
+        return 0, ""
+    score = _neck_opening_orientation_score(box.mask_path)
+    if score is None:
+        return 0, "裁片上下方向置信度偏低，建议人工确认。"
+    if score <= -0.08:
+        return 180, "已按版型方向旋转 180°。"
+    if score >= 0.08:
+        return 0, ""
+    return 0, "裁片上下方向置信度偏低，建议人工确认。"
+
+
+def _neck_opening_orientation_score(mask_path: str) -> float | None:
+    if not mask_path:
+        return None
+    path = Path(mask_path)
+    if not path.exists():
+        return None
+    try:
+        with Image.open(path).convert("L") as mask:
+            width, height = mask.size
+            if width < 8 or height < 8:
+                return None
+            band_h = max(4, min(height // 3, int(height * 0.28)))
+            center_left = width // 3
+            center_right = max(center_left + 1, width - center_left)
+            top_full = mask.crop((0, 0, width, band_h))
+            bottom_full = mask.crop((0, height - band_h, width, height))
+            top_center = mask.crop((center_left, 0, center_right, band_h))
+            bottom_center = mask.crop((center_left, height - band_h, center_right, height))
+            full_score = _transparent_ratio(top_full) - _transparent_ratio(bottom_full)
+            center_score = _transparent_ratio(top_center) - _transparent_ratio(bottom_center)
+            return center_score * 0.7 + full_score * 0.3
+    except Exception:
+        return None
+
+
+def _transparent_ratio(mask: Image.Image) -> float:
+    pixels = mask.tobytes()
+    if not pixels:
+        return 0.0
+    transparent = sum(1 for value in pixels if value < 16)
+    return transparent / len(pixels)
+
+
 def _fit_note(role: str, confidence: float, garment_type: str) -> str:
     garment_label = {"unknown": "未知", "t_shirt": "T 恤", "shirt": "衬衫"}.get(garment_type, garment_type or "未知")
     if role == "unknown":
@@ -346,3 +404,165 @@ def _default_avoid_zones(box: PieceBox) -> list[dict[str, float]]:
         {"x": 0, "y": 0, "width": seam, "height": box.height},
         {"x": box.width - seam, "y": 0, "width": seam, "height": box.height},
     ]
+
+
+# ---------------------------------------------------------------------------
+# 缝线对齐约束
+# ---------------------------------------------------------------------------
+
+# 每条边在裁片坐标系中对应的"代表坐标"：
+#   水平缝合边（shoulder / neckline）→ 对齐 design_x（水平相位）
+#   垂直缝合边（side / armhole / sleeve_cap）→ 对齐 design_y（垂直相位）
+_EDGE_AXIS: dict[str, str] = {
+    "shoulder": "x",
+    "neckline": "x",
+    "hem": "x",
+    "side": "y",
+    "armhole": "y",
+    "sleeve_cap": "y",
+}
+
+# 调整优先级：越靠后越容易被调整（保持主片不动，调整附属片）
+_ROLE_ADJUST_PRIORITY: dict[str, int] = {
+    "back": 0,          # 后片最稳，不调
+    "front_left": 1,
+    "front_right": 1,
+    "sleeve_left": 2,
+    "sleeve_right": 2,
+    "collar": 3,
+    "placket": 3,
+    "strip": 3,
+    "unknown": 4,
+}
+
+
+def _apply_seam_alignment(mapped: list[dict[str, Any]], snap: tuple[float, float]) -> None:
+    """
+    对所有已定位的裁片执行缝线对齐约束。
+
+    原理
+    ----
+    设计画布上平铺的纹理以 (period_x, period_y) 为最小重复单元。
+    两个裁片 A、B 在缝合边处的花型连续，等价于：
+        A 的缝合代表坐标 ≡ B 的缝合代表坐标  (mod period)
+
+    对于每对 seam_link (A.edge → B.to_edge)：
+    1. 计算 A 和 B 各自缝合边的"纹理相位代表值"：
+       - 水平边（shoulder/neckline/hem）→ design_x
+       - 垂直边（side/armhole/sleeve_cap）→ design_y
+    2. 计算相位差 delta = phase_A - phase_B
+    3. 将 delta 取整到最近周期的整数倍，得到修正量 correction
+    4. 按优先级：优先调整优先级高（数值大）的裁片，保持低优先级的裁片不动
+    5. 把修正量加到被调整裁片对应轴的 design_x/y 上
+
+    注意
+    ----
+    - 只在平铺模式下（snap 不为 None）运行，因为非平铺时不存在周期对齐语义
+    - 调整量有界，以初始取样坐标为中心，最多允许在 ±2 个周期内微调
+    - 调整后把对齐信息追加到 fit_note，便于调试
+    """
+    period_x, period_y = snap
+    # 建立 role → entry 的快速查找表（每个 role 只取第一个，多裁片同角色时跳过）
+    by_role: dict[str, dict[str, Any]] = {}
+    for entry in mapped:
+        role = entry["piece_role"]
+        if role not in by_role:
+            by_role[role] = entry
+
+    original_phase = {
+        (entry["id"], "x"): _seam_phase(entry, "x")
+        for entry in mapped
+    }
+    original_phase.update({
+        (entry["id"], "y"): _seam_phase(entry, "y")
+        for entry in mapped
+    })
+
+    for entry_a in mapped:
+        role_a = entry_a["piece_role"]
+        for link in entry_a.get("seam_links", []):
+            edge_a = link.get("edge", "")
+            role_b = link.get("to_role", "")
+            edge_b = link.get("to_edge", "")
+            axis = _EDGE_AXIS.get(edge_a) or _EDGE_AXIS.get(edge_b)
+            if not axis:
+                continue
+            entry_b = by_role.get(role_b)
+            if entry_b is None:
+                continue
+
+            period = period_x if axis == "x" else period_y
+            if period <= 0:
+                continue
+
+            phase_a = _seam_phase(entry_a, axis)
+            phase_b = _seam_phase(entry_b, axis)
+            delta = phase_a - phase_b
+            # 取最近整数倍 → 最小修正量
+            correction = _nearest_period_correction(delta, period)
+            if abs(correction) < 0.5:
+                continue  # 已经对齐，无需调整
+
+            # 决定调整哪一侧（优先调高优先级数值的那侧）
+            pri_a = _ROLE_ADJUST_PRIORITY.get(role_a, 4)
+            pri_b = _ROLE_ADJUST_PRIORITY.get(role_b, 4)
+            if pri_a > pri_b:
+                # 调整 A，使 phase_a 向 phase_b 靠拢
+                applied = _shift_entry(entry_a, axis, -correction, period, original_phase[(entry_a["id"], axis)])
+                _append_seam_note(entry_a, role_b, edge_a, axis, applied)
+            elif pri_b > pri_a:
+                # 调整 B，使 phase_b 向 phase_a 靠拢
+                applied = _shift_entry(entry_b, axis, correction, period, original_phase[(entry_b["id"], axis)])
+                _append_seam_note(entry_b, role_a, edge_b, axis, applied)
+            else:
+                # 同优先级：各向中间靠拢半步，保持相对位置对称
+                half = correction / 2
+                applied_a = _shift_entry(entry_a, axis, -half, period, original_phase[(entry_a["id"], axis)])
+                applied_b = _shift_entry(entry_b, axis, half, period, original_phase[(entry_b["id"], axis)])
+                _append_seam_note(entry_a, role_b, edge_a, axis, applied_a)
+                _append_seam_note(entry_b, role_a, edge_b, axis, applied_b)
+
+
+def _seam_phase(entry: dict[str, Any], axis: str) -> float:
+    """返回裁片在指定轴上的取样起始坐标（即纹理相位代表值）。"""
+    region = entry["design_region"]
+    return float(region["x"] if axis == "x" else region["y"])
+
+
+def _nearest_period_correction(delta: float, period: float) -> float:
+    """
+    计算将 delta 修正到最近周期整数倍所需的修正量。
+    例：period=100, delta=230 → nearest multiple=200 → correction=30
+         period=100, delta=270 → nearest multiple=300 → correction=-30
+    """
+    if period <= 0:
+        return 0.0
+    nearest = round(delta / period) * period
+    return delta - nearest
+
+
+def _shift_entry(entry: dict[str, Any], axis: str, amount: float, period: float, origin: float) -> float:
+    """在 design_region 中对指定轴施加偏移，并返回实际应用的偏移量。"""
+    region = entry["design_region"]
+    key = "x" if axis == "x" else "y"
+    current = float(region[key])
+    limit = abs(period) * 2
+    target = min(max(current + amount, origin - limit), origin + limit)
+    if axis == "x":
+        region["x"] = round(target, 2)
+    else:
+        region["y"] = round(target, 2)
+    return target - current
+
+
+def _append_seam_note(entry: dict[str, Any], partner_role: str, edge: str, axis: str, amount: float) -> None:
+    """把缝线对齐调整信息追加到 fit_note，便于前端展示和调试。"""
+    axis_label = "水平" if axis == "x" else "垂直"
+    partner_label = ROLE_LABELS.get(partner_role, partner_role)
+    edge_label = {
+        "shoulder": "肩缝", "neckline": "领口缝", "hem": "下摆缝",
+        "side": "侧缝", "armhole": "袖窿缝", "sleeve_cap": "袖山缝",
+    }.get(edge, edge)
+    note_fragment = f"已按{axis_label}纹理周期对齐{partner_label}{edge_label}（调整 {amount:+.1f}px）。"
+    current = entry.get("fit_note", "")
+    entry["fit_note"] = f"{current} {note_fragment}".strip()

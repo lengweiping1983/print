@@ -10,6 +10,9 @@ from PIL import Image, ImageChops, ImageDraw, ImageOps
 from PIL.Image import DecompressionBombWarning
 
 from .config import MAX_IMAGE_PIXELS, MIN_COMPONENT_AREA
+import logging
+
+logger = logging.getLogger(__name__)
 
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 warnings.simplefilter("error", DecompressionBombWarning)
@@ -23,9 +26,15 @@ except Exception:  # pragma: no cover - fallback keeps Pillow-only installs usab
 
 
 def image_size(path: Path) -> tuple[int, int]:
-    with Image.open(path) as img:
-        ensure_dimensions_within_limit(*img.size)
-        return img.size
+    try:
+        with Image.open(path) as img:
+            ensure_dimensions_within_limit(*img.size)
+            return img.size
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: %s", path)
+        raise RuntimeError(f"无法加载图片 {path}: {exc}") from exc
 
 
 def ensure_dimensions_within_limit(width: int, height: int) -> None:
@@ -40,8 +49,14 @@ def ensure_image_within_limit(path: Path) -> tuple[int, int]:
 
 def has_transparent_alpha(image_path: Path, transparent_threshold: int = 250) -> bool:
     ensure_image_within_limit(image_path)
-    with Image.open(image_path) as img:
-        return has_transparent_alpha_image(img, transparent_threshold)
+    try:
+        with Image.open(image_path) as img:
+            return has_transparent_alpha_image(img, transparent_threshold)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: %s", image_path)
+        raise RuntimeError(f"无法加载图片 {image_path}: {exc}") from exc
 
 
 def has_transparent_alpha_image(img: Image.Image, transparent_threshold: int = 250) -> bool:
@@ -59,8 +74,14 @@ def make_layout_template(
     channel_delta: int = 28,
 ) -> Path:
     ensure_image_within_limit(image_path)
-    with Image.open(image_path) as img:
-        return make_layout_template_from_image(img.convert("RGBA"), out_path, white_threshold, channel_delta)
+    try:
+        with Image.open(image_path) as img:
+            return make_layout_template_from_image(img.convert("RGBA"), out_path, white_threshold, channel_delta)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: %s", image_path)
+        raise RuntimeError(f"无法加载图片 {image_path}: {exc}") from exc
 
 
 def make_layout_template_from_image(
@@ -106,8 +127,14 @@ def make_red_marker_mask(
     red_delta: int = 45,
 ) -> Path | None:
     ensure_image_within_limit(image_path)
-    with Image.open(image_path) as img:
-        return make_red_marker_mask_from_image(img.convert("RGBA"), out_path, red_min, red_delta)
+    try:
+        with Image.open(image_path) as img:
+            return make_red_marker_mask_from_image(img.convert("RGBA"), out_path, red_min, red_delta)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: %s", image_path)
+        raise RuntimeError(f"无法加载图片 {image_path}: {exc}") from exc
 
 
 def make_red_marker_mask_from_image(
@@ -139,20 +166,30 @@ def write_piece_marker_masks(pieces: list[dict], marker_mask_path: Path | None) 
         return 0
 
     count = 0
-    with Image.open(marker_mask_path).convert("L") as full_marker:
-        for piece in pieces:
-            bbox = piece["bbox"]
-            box = (bbox["x"], bbox["y"], bbox["x"] + bbox["width"], bbox["y"] + bbox["height"])
-            marker = full_marker.crop(box)
-            with Image.open(piece["mask_path"]).convert("L") as piece_mask:
-                marker = ImageChops.multiply(marker, piece_mask)
-            marker_path = marker_path_for_mask(Path(piece["mask_path"]))
-            if marker.getbbox():
-                marker.save(marker_path)
-                piece["marker_path"] = marker_path
-                count += 1
-            else:
-                marker_path.unlink(missing_ok=True)
+    try:
+        with Image.open(marker_mask_path).convert("L") as full_marker:
+            for piece in pieces:
+                bbox = piece["bbox"]
+                box = (bbox["x"], bbox["y"], bbox["x"] + bbox["width"], bbox["y"] + bbox["height"])
+                marker = full_marker.crop(box)
+                try:
+                    with Image.open(piece["mask_path"]).convert("L") as piece_mask:
+                        marker = ImageChops.multiply(marker, piece_mask)
+                except Exception as exc:
+                    logger.exception("加载裁片 mask 失败: %s", piece["mask_path"])
+                    raise RuntimeError(f"无法加载裁片 mask {piece['mask_path']}: {exc}") from exc
+                marker_path = marker_path_for_mask(Path(piece["mask_path"]))
+                if marker.getbbox():
+                    marker.save(marker_path)
+                    piece["marker_path"] = marker_path
+                    count += 1
+                else:
+                    marker_path.unlink(missing_ok=True)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载标记图失败: %s", marker_mask_path)
+        raise RuntimeError(f"无法加载标记图 {marker_mask_path}: {exc}") from exc
     return count
 
 
@@ -241,8 +278,14 @@ def extract_alpha_components(
     min_area: int = MIN_COMPONENT_AREA,
 ) -> list[dict]:
     ensure_image_within_limit(image_path)
-    with Image.open(image_path).convert("RGBA") as img:
-        return extract_alpha_components_from_image(img, out_dir, min_area)
+    try:
+        with Image.open(image_path).convert("RGBA") as img:
+            return extract_alpha_components_from_image(img, out_dir, min_area)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: %s", image_path)
+        raise RuntimeError(f"无法加载图片 {image_path}: {exc}") from exc
 
 
 def extract_alpha_components_from_image(
@@ -444,11 +487,17 @@ def bbox_polygon(min_x: int, min_y: int, max_x: int, max_y: int) -> list[list[in
 def make_mirror_tile(source_path: Path, out_path: Path, width: int, height: int) -> tuple[int, int]:
     ensure_image_within_limit(source_path)
     ensure_dimensions_within_limit(width, height)
-    with Image.open(source_path).convert("RGBA") as src:
-        tile = make_mirror_tile_image(src)
-        out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        paint_tiled(out, tile, 0, 0)
-        out.save(out_path)
+    try:
+        with Image.open(source_path).convert("RGBA") as src:
+            tile = make_mirror_tile_image(src)
+            out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            paint_tiled(out, tile, 0, 0)
+            out.save(out_path)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: %s", source_path)
+        raise RuntimeError(f"无法加载图片 {source_path}: {exc}") from exc
     return width, height
 
 
@@ -519,11 +568,17 @@ def make_mirror_tile_image(src: Image.Image) -> Image.Image:
 def make_offset_tile(source_path: Path, out_path: Path, width: int, height: int) -> tuple[int, int]:
     ensure_image_within_limit(source_path)
     ensure_dimensions_within_limit(width, height)
-    with Image.open(source_path).convert("RGBA") as src:
-        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        paint_tiled(canvas, src, -src.width // 2, -src.height // 2)
-        canvas = ImageChops.offset(canvas, width // 2, height // 2)
-        canvas.save(out_path)
+    try:
+        with Image.open(source_path).convert("RGBA") as src:
+            canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            paint_tiled(canvas, src, -src.width // 2, -src.height // 2)
+            canvas = ImageChops.offset(canvas, width // 2, height // 2)
+            canvas.save(out_path)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: %s", source_path)
+        raise RuntimeError(f"无法加载图片 {source_path}: {exc}") from exc
     return width, height
 
 
@@ -574,7 +629,13 @@ def render_project_piece_image(
     if transform.get("mirror_y"):
         derived = ImageOps.flip(derived)
 
-    mask = Image.open(piece["mask_path"]).convert("L")
+    try:
+        mask = Image.open(piece["mask_path"]).convert("L")
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载裁片 mask 失败: %s", piece["mask_path"])
+        raise RuntimeError(f"无法加载裁片 mask {piece['mask_path']}: {exc}") from exc
     if derived.size != mask.size:
         derived = derived.resize(mask.size, Image.Resampling.LANCZOS)
     derived.putalpha(mask)
@@ -589,8 +650,14 @@ def render_piece_image(mask_path: Path, texture_path: Path, transform: dict, inc
         return render_piece_from_design_canvas_image(mask_path, texture_path, transform, include_markers=include_markers)
     ensure_image_within_limit(mask_path)
     ensure_image_within_limit(texture_path)
-    mask = Image.open(mask_path).convert("L")
-    texture = Image.open(texture_path).convert("RGBA")
+    try:
+        mask = Image.open(mask_path).convert("L")
+        texture = Image.open(texture_path).convert("RGBA")
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: mask=%s texture=%s", mask_path, texture_path)
+        raise RuntimeError(f"无法加载图片 mask={mask_path} texture={texture_path}: {exc}") from exc
     canvas = Image.new("RGBA", mask.size, (0, 0, 0, 0))
     scale = max(0.05, float(transform.get("scale", 1) or 1))
     tile_w = max(1, int(texture.width * scale))
@@ -628,17 +695,23 @@ def render_piece_from_design_canvas(mask_path: Path, design_canvas_path: Path, t
 def render_piece_from_design_canvas_image(mask_path: Path, design_canvas_path: Path, transform: dict, include_markers: bool = True) -> Image.Image:
     ensure_image_within_limit(mask_path)
     ensure_image_within_limit(design_canvas_path)
-    mask = Image.open(mask_path).convert("L")
-    with Image.open(design_canvas_path).convert("RGBA") as design_canvas:
-        design_x = float(transform.get("design_x", 0) or 0) + float(transform.get("offset_x", 0) or 0)
-        design_y = float(transform.get("design_y", 0) or 0) + float(transform.get("offset_y", 0) or 0)
-        scale = max(0.05, float(transform.get("scale", 1) or 1))
-        rotation = float(transform.get("rotation", 0) or 0)
-        sample = sample_design_window(design_canvas, design_x, design_y, mask.size, scale, rotation)
-        if transform.get("mirror_x"):
-            sample = ImageOps.mirror(sample)
-        if transform.get("mirror_y"):
-            sample = ImageOps.flip(sample)
+    try:
+        mask = Image.open(mask_path).convert("L")
+        with Image.open(design_canvas_path).convert("RGBA") as design_canvas:
+            design_x = float(transform.get("design_x", 0) or 0) + float(transform.get("offset_x", 0) or 0)
+            design_y = float(transform.get("design_y", 0) or 0) + float(transform.get("offset_y", 0) or 0)
+            scale = max(0.05, float(transform.get("scale", 1) or 1))
+            rotation = float(transform.get("rotation", 0) or 0)
+            sample = sample_design_window(design_canvas, design_x, design_y, mask.size, scale, rotation)
+            if transform.get("mirror_x"):
+                sample = ImageOps.mirror(sample)
+            if transform.get("mirror_y"):
+                sample = ImageOps.flip(sample)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载图片失败: mask=%s design_canvas=%s", mask_path, design_canvas_path)
+        raise RuntimeError(f"无法加载图片 mask={mask_path} design_canvas={design_canvas_path}: {exc}") from exc
     sample.putalpha(mask)
     if include_markers:
         composite_piece_markers(sample, mask_path)
@@ -725,25 +798,35 @@ def composite_piece_markers(canvas: Image.Image, mask_path: Path) -> None:
     marker_path = marker_path_for_mask(mask_path)
     if not marker_path.exists():
         return
-    with Image.open(marker_path).convert("L") as marker:
-        if marker.size != canvas.size or not marker.getbbox():
-            return
-        overlay = Image.new("RGBA", canvas.size, (239, 0, 40, 255))
-        overlay.putalpha(marker)
-        canvas.alpha_composite(overlay)
+    try:
+        with Image.open(marker_path).convert("L") as marker:
+            if marker.size != canvas.size or not marker.getbbox():
+                return
+            overlay = Image.new("RGBA", canvas.size, (239, 0, 40, 255))
+            overlay.putalpha(marker)
+            canvas.alpha_composite(overlay)
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        logger.exception("加载标记图失败: %s", marker_path)
+        raise RuntimeError(f"无法加载标记图 {marker_path}: {exc}") from exc
 
 
 def render_piece_svg(mask_path: Path, out_path: Path) -> Path:
     ensure_image_within_limit(mask_path)
-    with Image.open(mask_path).convert("L") as mask:
-        buffer = BytesIO()
-        mask.save(buffer, format="PNG")
-        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{mask.width}" height="{mask.height}" viewBox="0 0 {mask.width} {mask.height}">
+    try:
+        with Image.open(mask_path).convert("L") as mask:
+            buffer = BytesIO()
+            mask.save(buffer, format="PNG")
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{mask.width}" height="{mask.height}" viewBox="0 0 {mask.width} {mask.height}">
   <title>{out_path.stem} cutting mask</title>
   <image width="{mask.width}" height="{mask.height}" href="data:image/png;base64,{encoded}" />
 </svg>
 """
+    except Exception as exc:
+        logger.exception("加载图片失败: %s", mask_path)
+        raise RuntimeError(f"无法加载图片 {mask_path}: {exc}") from exc
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(svg, encoding="utf-8")
     return out_path

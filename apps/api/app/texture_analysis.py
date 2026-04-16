@@ -6,6 +6,10 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageStat
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 SOURCE_KEYWORDS = {
     "logo",
@@ -202,38 +206,42 @@ def detect_repeat_period(image_path: Path, *, image_stats: dict[str, float] | No
 
 
 def _image_stats(image_path: Path) -> dict[str, float]:
-    with Image.open(image_path).convert("RGBA") as img:
-        alpha = img.getchannel("A")
-        alpha_stat = ImageStat.Stat(alpha)
-        transparent_ratio = 1 - (alpha_stat.mean[0] / 255)
-        width, height = img.size
-        edge = Image.new("L", img.size, 0)
-        edge_pixels = edge.load()
-        if edge_pixels is not None:
-            for x in range(width):
-                edge_pixels[x, 0] = 255
-                edge_pixels[x, height - 1] = 255
-            for y in range(height):
-                edge_pixels[0, y] = 255
-                edge_pixels[width - 1, y] = 255
-        edge_alpha = ImageChops.multiply(alpha, edge)
-        edge_alpha_stat = ImageStat.Stat(edge_alpha)
-        edge_pixels_count = max(1, width * 2 + height * 2 - 4)
-        edge_alpha_ratio = min(1.0, edge_alpha_stat.sum[0] / (edge_pixels_count * 255))
+    try:
+        with Image.open(image_path).convert("RGBA") as img:
+            alpha = img.getchannel("A")
+            alpha_stat = ImageStat.Stat(alpha)
+            transparent_ratio = 1 - (alpha_stat.mean[0] / 255)
+            width, height = img.size
+            edge = Image.new("L", img.size, 0)
+            edge_pixels = edge.load()
+            if edge_pixels is not None:
+                for x in range(width):
+                    edge_pixels[x, 0] = 255
+                    edge_pixels[x, height - 1] = 255
+                for y in range(height):
+                    edge_pixels[0, y] = 255
+                    edge_pixels[width - 1, y] = 255
+            edge_alpha = ImageChops.multiply(alpha, edge)
+            edge_alpha_stat = ImageStat.Stat(edge_alpha)
+            edge_pixels_count = max(1, width * 2 + height * 2 - 4)
+            edge_alpha_ratio = min(1.0, edge_alpha_stat.sum[0] / (edge_pixels_count * 255))
 
-        rgb = img.convert("RGB")
-        left = rgb.crop((0, 0, 1, height)).resize((1, 64))
-        right = rgb.crop((width - 1, 0, width, height)).resize((1, 64))
-        top = rgb.crop((0, 0, width, 1)).resize((64, 1))
-        bottom = rgb.crop((0, height - 1, width, height)).resize((64, 1))
-        horizontal = _normalized_diff(left, right)
-        vertical = _normalized_diff(top, bottom)
-        edge_similarity = 1 - ((horizontal + vertical) / 2)
-    return {
-        "transparent_ratio": transparent_ratio,
-        "edge_alpha_ratio": edge_alpha_ratio,
-        "edge_similarity": max(0.0, min(1.0, edge_similarity)),
-    }
+            rgb = img.convert("RGB")
+            left = rgb.crop((0, 0, 1, height)).resize((1, 64))
+            right = rgb.crop((width - 1, 0, width, height)).resize((1, 64))
+            top = rgb.crop((0, 0, width, 1)).resize((64, 1))
+            bottom = rgb.crop((0, height - 1, width, height)).resize((64, 1))
+            horizontal = _normalized_diff(left, right)
+            vertical = _normalized_diff(top, bottom)
+            edge_similarity = 1 - ((horizontal + vertical) / 2)
+            return {
+                "transparent_ratio": transparent_ratio,
+                "edge_alpha_ratio": edge_alpha_ratio,
+                "edge_similarity": max(0.0, min(1.0, edge_similarity)),
+            }
+    except Exception as exc:
+        logger.exception("分析图片统计信息失败: %s", image_path)
+        raise RuntimeError(f"无法分析图片统计信息 {image_path}: {exc}") from exc
 
 
 def _normalized_diff(a: Image.Image, b: Image.Image) -> float:

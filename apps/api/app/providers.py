@@ -2,6 +2,9 @@ import base64
 import os
 import time
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 import httpx
 from PIL import Image, ImageDraw
@@ -122,9 +125,13 @@ def closest_openai_size(width: int, height: int) -> str:
 
 
 def normalize_size(path: Path, width: int, height: int) -> None:
-    with Image.open(path).convert("RGBA") as img:
-        if img.size != (width, height):
-            img.resize((width, height), Image.Resampling.LANCZOS).save(path)
+    try:
+        with Image.open(path).convert("RGBA") as img:
+            if img.size != (width, height):
+                img.resize((width, height), Image.Resampling.LANCZOS).save(path)
+    except Exception as exc:
+        logger.exception("加载图片失败: %s", path)
+        raise RuntimeError(f"无法加载图片 {path}: {exc}") from exc
 
 
 def download_to(url: str, path: Path) -> None:

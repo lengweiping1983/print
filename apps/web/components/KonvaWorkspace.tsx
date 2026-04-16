@@ -330,6 +330,7 @@ type SinglePieceCalibrationProps = {
   textureUrl: string;
   showOutlines: boolean;
   outlineWidth?: number;
+  designCanvas?: DesignCanvas | null;
   onToggleOutlines: (visible: boolean) => void;
   onOutlineWidthChange?: (width: number) => void;
   onMovePiece: (piece: Piece, x: number, y: number) => void;
@@ -337,7 +338,7 @@ type SinglePieceCalibrationProps = {
   onResetPiece?: () => void;
 };
 
-export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece, onPatchTransform, onResetPiece }: SinglePieceCalibrationProps) {
+export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, designCanvas, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece, onPatchTransform, onResetPiece }: SinglePieceCalibrationProps) {
   const textureImage = useLoadedImage(textureUrl);
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
@@ -361,6 +362,18 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
     return { x: (stageWidth - width) / 2, y: (stageHeight - height) / 2, width, height };
   }, [selected, stageHeight, stageWidth]);
   const [activeToolbarPopover, setActiveToolbarPopover] = useState("");
+  const [dragPreviewOffset, setDragPreviewOffset] = useState<{ pieceId: string; x: number; y: number } | null>(null);
+  const displayPiece = useMemo(() => {
+    if (!selected || dragPreviewOffset?.pieceId !== selected.id) return selected;
+    return {
+      ...selected,
+      transform: {
+        ...selected.transform,
+        offset_x: dragPreviewOffset.x,
+        offset_y: dragPreviewOffset.y
+      }
+    };
+  }, [dragPreviewOffset, selected]);
 
   return (
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
@@ -400,9 +413,9 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
             {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
             {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
           </Layer>
-          {textureImage && selected && selectedMaskFrame && (
+          {textureImage && displayPiece && selectedMaskFrame && (
             <DimmedTextureLayer
-              piece={selected}
+              piece={displayPiece}
               textureImage={textureImage}
               frame={selectedMaskFrame}
               zoom={pieceZoom}
@@ -410,16 +423,21 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
               stageHeight={stageHeight}
             />
           )}
-          {textureImage && selected && alphaMaskImage && selectedMaskFrame && (
+          {textureImage && displayPiece && alphaMaskImage && selectedMaskFrame && (
             <ClippedTextureLayer
-              piece={selected}
+              piece={displayPiece}
               textureImage={textureImage}
               maskImage={alphaMaskImage}
               frame={selectedMaskFrame}
               zoom={pieceZoom}
-              draggable={!selected.mirror_of}
-              opacity={selected.mirror_of ? 0.45 : 1}
-              onMove={(x, y) => onMovePiece(selected, x, y)}
+              draggable={!displayPiece.mirror_of}
+              opacity={displayPiece.mirror_of ? 0.45 : 1}
+              onPreviewMove={(x, y) => setDragPreviewOffset({ pieceId: displayPiece.id, x, y })}
+              onMove={(x, y) => {
+                setDragPreviewOffset(null);
+                onMovePiece(selected, x, y);
+              }}
+              onMoveCancel={() => setDragPreviewOffset(null)}
             />
           )}
           {showOutlines && outlineImage && selectedMaskFrame && (
@@ -441,37 +459,62 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
             {onResetPiece && (
               <ToolbarResetButton popoverId="single-reset" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} onReset={onResetPiece} disabled={selected.transform.locked} />
             )}
-            <PieceToolbarButton popoverId="single-x" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="X" value={selected.transform.design_x ?? 0} disabled={selected.transform.locked}>
+            <ToolbarSnapButton
+              popoverId="single-snap"
+              activePopover={activeToolbarPopover}
+              setActivePopover={setActiveToolbarPopover}
+              disabled={selected.transform.locked}
+              designCanvas={designCanvas ?? null}
+              piece={selected}
+              onPatchTransform={onPatchTransform}
+            />
+            <ToolbarCenterButton
+              popoverId="single-center"
+              activePopover={activeToolbarPopover}
+              setActivePopover={setActiveToolbarPopover}
+              disabled={selected.transform.locked}
+              piece={selected}
+              onPatchTransform={onPatchTransform}
+            />
+            <ToolbarOrientationButton
+              popoverId="single-orientation"
+              activePopover={activeToolbarPopover}
+              setActivePopover={setActiveToolbarPopover}
+              disabled={selected.transform.locked}
+              piece={selected}
+              onPatchTransform={onPatchTransform}
+            />
+            <PieceToolbarButton popoverId="single-x" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="X" value={selected.transform.offset_x ?? 0} disabled={selected.transform.locked}>
               <div className="mb-1 flex items-center justify-between">
-                <span className="text-sm font-semibold">全局 X</span>
-                <span className="text-sm font-bold">{selected.transform.design_x ?? 0}</span>
+                <span className="text-sm font-semibold">平移 X</span>
+                <span className="text-sm font-bold">{selected.transform.offset_x ?? 0}</span>
               </div>
               <input
                 type="range"
-                min={0}
-                max={8192}
-                value={selected.transform.design_x ?? 0}
-                onChange={(e) => onPatchTransform({ design_x: Number(e.target.value) })}
+                min={-2048}
+                max={2048}
+                value={selected.transform.offset_x ?? 0}
+                onChange={(e) => onPatchTransform({ offset_x: Number(e.target.value) })}
                 disabled={selected.transform.locked}
                 className="w-full accent-action"
               />
-              <p className="mt-1.5 text-xs leading-5 text-slate-500">裁片左上角在全局画布中的左右位置。</p>
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">左右移动裁片中的布料取样位置。</p>
             </PieceToolbarButton>
-            <PieceToolbarButton popoverId="single-y" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="Y" value={selected.transform.design_y ?? 0} disabled={selected.transform.locked}>
+            <PieceToolbarButton popoverId="single-y" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="Y" value={selected.transform.offset_y ?? 0} disabled={selected.transform.locked}>
               <div className="mb-1 flex items-center justify-between">
-                <span className="text-sm font-semibold">全局 Y</span>
-                <span className="text-sm font-bold">{selected.transform.design_y ?? 0}</span>
+                <span className="text-sm font-semibold">平移Y</span>
+                <span className="text-sm font-bold">{selected.transform.offset_y ?? 0}</span>
               </div>
               <input
                 type="range"
-                min={0}
-                max={8192}
-                value={selected.transform.design_y ?? 0}
-                onChange={(e) => onPatchTransform({ design_y: Number(e.target.value) })}
+                min={-2048}
+                max={2048}
+                value={selected.transform.offset_y ?? 0}
+                onChange={(e) => onPatchTransform({ offset_y: Number(e.target.value) })}
                 disabled={selected.transform.locked}
                 className="w-full accent-action"
               />
-              <p className="mt-1.5 text-xs leading-5 text-slate-500">裁片左上角在全局画布中的上下位置。</p>
+              <p className="mt-1.5 text-xs leading-5 text-slate-500">上下移动裁片中的布料取样位置。</p>
             </PieceToolbarButton>
             <PieceToolbarButton popoverId="single-scale" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="缩" value={selected.transform.scale} disabled={selected.transform.locked}>
               <div className="mb-1 flex items-center justify-between">
@@ -1134,6 +1177,174 @@ function ToolbarResetButton({ popoverId, activePopover, setActivePopover, onRese
   );
 }
 
+// ---------------------------------------------------------------------------
+// 快捷操作：吸附 & 居中
+// ---------------------------------------------------------------------------
+
+function ToolbarSnapButton({
+  popoverId,
+  activePopover,
+  setActivePopover,
+  disabled,
+  designCanvas,
+  piece,
+  onPatchTransform,
+}: ToolbarPopoverProps & {
+  disabled?: boolean;
+  designCanvas: DesignCanvas | null;
+  piece: Piece;
+  onPatchTransform: (transform: Partial<Piece["transform"]>) => void;
+}) {
+  const popover = useToolbarPopover({ popoverId, activePopover, setActivePopover }, Boolean(disabled));
+  const repeat = designCanvas?.texture_repeat;
+  const hasRepeat = repeat?.has_repeat && (repeat.period_x > 0 || repeat.period_y > 0);
+  const scale = designCanvas?.texture_scale ?? 1;
+  const periodX = repeat?.period_x ? repeat.period_x * scale : 0;
+  const periodY = repeat?.period_y ? repeat.period_y * scale : 0;
+  const offsetX = Number(designCanvas?.texture_offset_x || 0);
+  const offsetY = Number(designCanvas?.texture_offset_y || 0);
+
+  const handleSnap = () => {
+    if (!hasRepeat || !repeat) return;
+    const curX = piece.transform.design_x ?? 0;
+    const curY = piece.transform.design_y ?? 0;
+    const snappedX = periodX > 0 ? offsetX + Math.round((curX - offsetX) / periodX) * periodX : curX;
+    const snappedY = periodY > 0 ? offsetY + Math.round((curY - offsetY) / periodY) * periodY : curY;
+    if (Math.abs(snappedX - curX) > 0.5 || Math.abs(snappedY - curY) > 0.5) {
+      onPatchTransform({ design_x: Math.round(snappedX), design_y: Math.round(snappedY) });
+    }
+  };
+
+  return (
+    <div className="relative" onMouseEnter={popover.open} onMouseLeave={popover.close} onFocus={popover.open} onBlur={popover.close}>
+      <button
+        className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 ring-line transition hover:-translate-y-0.5 ${
+          disabled || !hasRepeat ? "bg-slate-100 text-slate-400" : "bg-white text-blue-600 hover:bg-blue-50"
+        }`}
+        onClick={handleSnap}
+        disabled={disabled || !hasRepeat}
+      >
+        吸
+      </button>
+      <div className={`absolute right-full top-0 h-full w-3 ${popover.visible ? "pointer-events-auto" : "pointer-events-none"}`} />
+      <div className={`absolute right-full top-1/2 w-56 -translate-y-1/2 -translate-x-2 rounded-xl border border-line bg-white p-3 shadow-xl transition ${popover.visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>
+        <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
+        <p className="text-sm font-semibold">吸附到纹理周期</p>
+        {hasRepeat ? (
+          <>
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">
+              将取样坐标对齐到纹理周期的最近整数倍，确保接缝处花型连续。
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              周期: X={periodX > 0 ? `${Math.round(periodX)}px` : "未检测"} &nbsp; Y={periodY > 0 ? `${Math.round(periodY)}px` : "未检测"}
+            </p>
+          </>
+        ) : (
+          <p className="mt-1.5 text-xs leading-5 text-slate-500">当前纹理无可检测的重复周期，吸附不可用。</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolbarCenterButton({
+  popoverId,
+  activePopover,
+  setActivePopover,
+  disabled,
+  piece,
+  onPatchTransform,
+}: ToolbarPopoverProps & {
+  disabled?: boolean;
+  piece: Piece;
+  onPatchTransform: (transform: Partial<Piece["transform"]>) => void;
+}) {
+  const popover = useToolbarPopover({ popoverId, activePopover, setActivePopover }, Boolean(disabled));
+
+  const handleCenter = () => {
+    const hasOffset = (piece.transform.offset_x ?? 0) !== 0 || (piece.transform.offset_y ?? 0) !== 0;
+    if (hasOffset) {
+      onPatchTransform({ offset_x: 0, offset_y: 0 });
+    }
+  };
+
+  const isAlreadyCentered = (piece.transform.offset_x ?? 0) === 0 && (piece.transform.offset_y ?? 0) === 0;
+
+  return (
+    <div className="relative" onMouseEnter={popover.open} onMouseLeave={popover.close} onFocus={popover.open} onBlur={popover.close}>
+      <button
+        className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 ring-line transition hover:-translate-y-0.5 ${
+          disabled || isAlreadyCentered ? "bg-slate-100 text-slate-400" : "bg-white text-green-600 hover:bg-green-50"
+        }`}
+        onClick={handleCenter}
+        disabled={disabled || isAlreadyCentered}
+      >
+        中
+      </button>
+      <div className={`absolute right-full top-0 h-full w-3 ${popover.visible ? "pointer-events-auto" : "pointer-events-none"}`} />
+      <div className={`absolute right-full top-1/2 w-56 -translate-y-1/2 -translate-x-2 rounded-xl border border-line bg-white p-3 shadow-xl transition ${popover.visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>
+        <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
+        <p className="text-sm font-semibold">居中取样位置</p>
+        <p className="mt-1.5 text-xs leading-5 text-slate-500">
+          清除手动偏移，将裁片取样位置恢复到自动分配的默认坐标。
+        </p>
+        {!isAlreadyCentered && (
+          <p className="mt-1 text-xs text-slate-400">
+            当前偏移: X={piece.transform.offset_x ?? 0}, Y={piece.transform.offset_y ?? 0}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolbarOrientationButton({
+  popoverId,
+  activePopover,
+  setActivePopover,
+  disabled,
+  piece,
+  onPatchTransform,
+}: ToolbarPopoverProps & {
+  disabled?: boolean;
+  piece: Piece;
+  onPatchTransform: (transform: Partial<Piece["transform"]>) => void;
+}) {
+  const popover = useToolbarPopover({ popoverId, activePopover, setActivePopover }, Boolean(disabled));
+  const normalizedRotation = normalizeHalfTurn(piece.transform.rotation || 0);
+  const inverted = normalizedRotation === 180;
+  const handleToggle = () => {
+    onPatchTransform({ rotation: inverted ? 0 : 180 });
+  };
+
+  return (
+    <div className="relative" onMouseEnter={popover.open} onMouseLeave={popover.close} onFocus={popover.open} onBlur={popover.close}>
+      <button
+        className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold shadow ring-1 ring-line transition hover:-translate-y-0.5 ${
+          disabled ? "bg-slate-100 text-slate-400" : inverted ? "bg-amber-100 text-amber-700 hover:bg-amber-50" : "bg-white text-teal-600 hover:bg-teal-50"
+        }`}
+        onClick={handleToggle}
+        disabled={disabled}
+      >
+        向
+      </button>
+      <div className={`absolute right-full top-0 h-full w-3 ${popover.visible ? "pointer-events-auto" : "pointer-events-none"}`} />
+      <div className={`absolute right-full top-1/2 w-56 -translate-y-1/2 -translate-x-2 rounded-xl border border-line bg-white p-3 shadow-xl transition ${popover.visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>
+        <div className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-t border-r border-line bg-white" />
+        <p className="text-sm font-semibold">版型方向</p>
+        <p className="mt-1.5 text-xs leading-5 text-slate-500">
+          当前为{inverted ? "倒置取样" : "正向取样"}。如果模板中这个裁片上下颠倒，点击按钮可旋转 180°，让前后身在全局设计画布中保持同一穿着方向。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function normalizeHalfTurn(rotation: number) {
+  const normalized = ((rotation % 360) + 360) % 360;
+  return normalized >= 90 && normalized < 270 ? 180 : 0;
+}
+
 function DimmedTextureLayer({
   piece,
   textureImage,
@@ -1225,7 +1436,9 @@ function ClippedTextureLayer({
   zoom = 1,
   draggable = false,
   opacity = 1,
+  onPreviewMove,
   onMove,
+  onMoveCancel,
   onSelect
 }: {
   piece: Piece;
@@ -1238,7 +1451,9 @@ function ClippedTextureLayer({
   zoom?: number;
   draggable?: boolean;
   opacity?: number;
+  onPreviewMove?: (x: number, y: number) => void;
   onMove?: (x: number, y: number) => void;
+  onMoveCancel?: () => void;
   onSelect?: () => void;
 }) {
   const renderPiece = contentPiece || piece;
@@ -1273,6 +1488,20 @@ function ClippedTextureLayer({
   const imageHeight = globalMode ? frame.height : Math.max(1, textureImage.naturalHeight * renderPiece.transform.scale * frameScale);
   const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : renderPiece.transform.offset_x * frameScale);
   const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : renderPiece.transform.offset_y * frameScale);
+  const commitDragOffset = (x: number, y: number) => {
+    if (globalMode) {
+      const deltaX = Math.round((x - (frame.x + frame.width / 2)) / frameScale);
+      const deltaY = Math.round((y - (frame.y + frame.height / 2)) / frameScale);
+      return {
+        x: renderPiece.transform.offset_x - deltaX,
+        y: renderPiece.transform.offset_y - deltaY
+      };
+    }
+    return {
+      x: Math.round((x - (frame.x + frame.width / 2)) / frameScale),
+      y: Math.round((y - (frame.y + frame.height / 2)) / frameScale)
+    };
+  };
 
   return (
     <Layer scaleX={zoom} scaleY={zoom}>
@@ -1291,20 +1520,29 @@ function ClippedTextureLayer({
         draggable={draggable && !piece.transform.locked}
         onClick={onSelect}
         onTap={onSelect}
-        onDragEnd={(event) => {
-          if (!onMove) return;
+        onDragMove={(event) => {
+          if (!onPreviewMove) return;
+          const next = commitDragOffset(event.target.x(), event.target.y());
           if (globalMode) {
-            const deltaX = Math.round((event.target.x() - (frame.x + frame.width / 2)) / frameScale);
-            const deltaY = Math.round((event.target.y() - (frame.y + frame.height / 2)) / frameScale);
             event.target.x(frame.x + frame.width / 2);
             event.target.y(frame.y + frame.height / 2);
-            onMove(piece.transform.offset_x - deltaX, piece.transform.offset_y - deltaY);
-          } else {
-            onMove(
-              Math.round((event.target.x() - (frame.x + frame.width / 2)) / frameScale),
-              Math.round((event.target.y() - (frame.y + frame.height / 2)) / frameScale)
-            );
           }
+          onPreviewMove(next.x, next.y);
+        }}
+        onDragEnd={(event) => {
+          if (!onMove) return;
+          const next = commitDragOffset(event.target.x(), event.target.y());
+          if (globalMode) {
+            event.target.x(frame.x + frame.width / 2);
+            event.target.y(frame.y + frame.height / 2);
+          }
+          onMove(next.x, next.y);
+        }}
+        onDragStart={() => {
+          onPreviewMove?.(renderPiece.transform.offset_x, renderPiece.transform.offset_y);
+        }}
+        onDragCancel={() => {
+          onMoveCancel?.();
         }}
       />
       <KonvaImage

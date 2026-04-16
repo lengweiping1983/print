@@ -10,6 +10,9 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .config import DEFAULT_DPI, MAX_UPLOAD_BYTES, PROJECTS_DIR, STORAGE_DIR
 from .db import connect, dumps, init_db, loads, now_iso, rel_path, row_to_dict, storage_path
@@ -36,6 +39,7 @@ from .image_ops import (
 from .jobs import create_job, update_job_progress
 from .layout_ops import ROLE_LABELS, auto_map_pieces, build_design_canvas_config, merge_mapping_into_transform
 from .providers import get_provider
+from . import neodomain
 from .schemas import (
     AssetOut,
     AutoMapRequest,
@@ -82,6 +86,7 @@ app.add_middleware(
 
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+app.include_router(neodomain.router)
 
 app.mount("/files", StaticFiles(directory=STORAGE_DIR), name="files")
 
@@ -188,8 +193,12 @@ def _import_template_job(job_id: str, payload: dict) -> dict:
     ensure_image_within_limit(source_path)
     update_job_progress(job_id, 0.12)
     templates_dir = project_dir(project_id) / "templates"
-    with Image.open(source_path) as opened:
-        source_image = opened.convert("RGBA")
+    try:
+        with Image.open(source_path) as opened:
+            source_image = opened.convert("RGBA")
+    except Exception as exc:
+        logger.exception("加载模板源图失败: %s", source_path)
+        raise RuntimeError(f"无法加载模板源图 {source_path}: {exc}") from exc
     template_source = "alpha" if has_transparent_alpha_image(source_image) else "layout_image"
     if template_source == "alpha":
         template_path = source_path
@@ -198,8 +207,12 @@ def _import_template_job(job_id: str, payload: dict) -> dict:
         template_path = templates_dir / f"{asset_id}_template.png"
         update_job_progress(job_id, 0.24)
         make_layout_template_from_image(source_image, template_path)
-        with Image.open(template_path) as opened_template:
-            template_image = opened_template.convert("RGBA")
+        try:
+            with Image.open(template_path) as opened_template:
+                template_image = opened_template.convert("RGBA")
+        except Exception as exc:
+            logger.exception("加载模板图失败: %s", template_path)
+            raise RuntimeError(f"无法加载模板图 {template_path}: {exc}") from exc
     update_job_progress(job_id, 0.4)
     red_marker_path = make_red_marker_mask_from_image(source_image, templates_dir / f"{asset_id}_red_markers.png")
 

@@ -7,6 +7,10 @@ from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 from .image_ops import ensure_dimensions_within_limit, ensure_image_within_limit, make_mirror_tile_image, paint_tiled
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def build_design_texture_canvas(
     texture_path: Path,
@@ -25,21 +29,25 @@ def build_design_texture_canvas(
     ensure_dimensions_within_limit(width, height)
     ensure_image_within_limit(texture_path)
 
-    with Image.open(texture_path).convert("RGBA") as src:
-        tile_w = max(1, int(src.width * scale))
-        tile_h = max(1, int(src.height * scale))
-        tile = src.resize((tile_w, tile_h), Image.Resampling.LANCZOS)
-        if mirror:
-            tile = make_mirror_tile_image(tile)
-        if angle:
-            tile = tile.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
-        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        if tile_enabled:
-            start_x = -tile.width + (offset_x % max(1, tile.width))
-            start_y = -tile.height + (offset_y % max(1, tile.height))
-            paint_tiled(canvas, tile, start_x, start_y)
-        else:
-            canvas.alpha_composite(tile, ((width - tile.width) // 2 + offset_x, (height - tile.height) // 2 + offset_y))
+    try:
+        with Image.open(texture_path).convert("RGBA") as src:
+            tile_w = max(1, int(src.width * scale))
+            tile_h = max(1, int(src.height * scale))
+            tile = src.resize((tile_w, tile_h), Image.Resampling.LANCZOS)
+            if mirror:
+                tile = make_mirror_tile_image(tile)
+            if angle:
+                tile = tile.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
+            canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            if tile_enabled:
+                start_x = -tile.width + (offset_x % max(1, tile.width))
+                start_y = -tile.height + (offset_y % max(1, tile.height))
+                paint_tiled(canvas, tile, start_x, start_y)
+            else:
+                canvas.alpha_composite(tile, ((width - tile.width) // 2 + offset_x, (height - tile.height) // 2 + offset_y))
+    except Exception as exc:
+        logger.exception("加载纹理图片失败: %s", texture_path)
+        raise RuntimeError(f"无法加载纹理图片 {texture_path}: {exc}") from exc
 
     _draw_design_layers(canvas, design_canvas, asset_paths or {})
     _draw_anchor_guides(canvas, design_canvas)

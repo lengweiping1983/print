@@ -260,3 +260,12 @@ class ProjectFromTemplateRequest(BaseModel):
     set_id: str
     size_name: str
     copy_design_from_base: bool = True
+
+
+class FabricPromptOut(BaseModel):
+    id: str
+    code: str
+    name: str
+    scenarios: str
+    prompt: str
+    sort_order: int

@@ -1,4 +1,4 @@
-import type { Asset, DesignCanvas, GlobalFitOptions, Job, Piece, PieceTransform, Project, SetPieceDef, SizeTemplate, SizeTemplatePiece, TemplateSet, Texture } from "@print-studio/shared-types";
+import type { Asset, DesignCanvas, FabricPrompt, GlobalFitOptions, Job, Piece, PieceTransform, Project, SetPieceDef, SizeTemplate, SizeTemplatePiece, TemplateSet, Texture } from "@print-studio/shared-types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
@@ -201,6 +201,9 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify({ set_id: setId, size_name: sizeName, copy_design_from_base: copyDesignFromBase }),
     });
+  },
+  listFabricPrompts() {
+    return request<FabricPrompt[]>("/api/fabric-prompts");
   },
 };
 

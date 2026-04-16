@@ -638,17 +638,6 @@ export function StudioPage() {
 
           <Panel title="纹理">
             <div className="space-y-2">
-              <div className="flex justify-center gap-2">
-                <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
-                  上传布料
-                </button>
-                <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
-                  上传衣服
-                </button>
-                <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => setShowAiTextureDialog(true)}>
-                  AI 生成
-                </button>
-              </div>
               <input
                 ref={fabricInputRef}
                 className="hidden"
@@ -671,18 +660,31 @@ export function StudioPage() {
                   event.currentTarget.value = "";
                 }}
               />
-              {activeTexture ? (
-                <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前纹理" />
-              ) : (
-                <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm text-slate-500">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <polyline points="21 15 16 10 5 21" />
-                  </svg>
-                  暂无纹理
+              <div className="relative">
+                <div className="absolute left-0 right-0 top-2 z-10 flex justify-center gap-2">
+                  <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
+                    上传布料
+                  </button>
+                  <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
+                    上传衣服
+                  </button>
+                  <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => setShowAiTextureDialog(true)}>
+                    AI 生图
+                  </button>
                 </div>
-              )}
+                {activeTexture ? (
+                  <img className="checkerboard h-40 w-full rounded-lg object-contain pt-8" src={selectedInputTextureUrl} alt="当前纹理" />
+                ) : (
+                  <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line pt-8 text-sm text-slate-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    暂无纹理
+                  </div>
+                )}
+              </div>
               <p className="m-0 text-xs text-slate-500">
                 {activeTexture ? `纹理大小：${activeTexture.width} x ${activeTexture.height}` : "纹理大小：未生成"}
               </p>
@@ -724,7 +726,7 @@ export function StudioPage() {
                 </div>
                 </>
               ) : (
-                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">上传布料、上传衣服复刻，或使用 AI 生成纹理。</p>
+                <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">上传布料、上传衣服复刻，或使用 AI 生图纹理。</p>
               )}
             </div>
 
@@ -868,6 +870,7 @@ export function StudioPage() {
               textureUrl={workspaceTextureUrl}
               showOutlines={showOutlines}
               outlineWidth={outlineWidth}
+              designCanvas={designCanvas}
               onToggleOutlines={setShowOutlines}
               onOutlineWidthChange={setOutlineWidth}
               onMovePiece={(piece, x, y) => {

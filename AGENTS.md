@@ -10,7 +10,7 @@
 
 1. 创建项目并上传透明 PNG/WebP 裁片模板。
 2. 后端按 alpha 连通域自动拆分裁片，保存 mask、bbox、坐标和 transform。
-3. 上传图案/衣服参考图，或用 prompt 调用 AI 生成纹理。
+3. 上传图案/衣服参考图，或用 prompt 调用 AI 生图纹理。
 4. 生成镜像或 offset 无缝大布料图。
 5. 在 Web 工作台中调节单裁片的平移、缩放、旋转、镜像，支持画布直接拖拽。
 6. 导出整套预览 PNG、单裁片透明 PNG、manifest JSON 和 ZIP 打样包。

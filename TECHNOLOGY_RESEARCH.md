@@ -54,7 +54,7 @@ Konva 画布交互：单片校正（平移/缩放/旋转/镜像）
 | UI 库 | React 19 | Hooks, 函数组件 |
 | 画布引擎 | Konva 9.x + react-konva 19 | 2D Canvas 抽象层，支持拖拽、缩放、事件 |
 | 样式 | Tailwind CSS 3.4 | 原子化 CSS，响应式布局 |
-| AI 生成 | OpenAI gpt-image-1 / Replicate / Local | 多 Provider  fallback 机制 |
+| AI 生图 | OpenAI gpt-image-1 / Replicate / Local | 多 Provider  fallback 机制 |
 
 ---
 
@@ -319,7 +319,7 @@ Replicate 采用**异步 Prediction 模式**：
 | **可控性** | 纯文生图难以控制花纹重复周期 | ControlNet + Canny/Depth 边缘约束 |
 | **分辨率** | 打印级布料需要 300 DPI，单图可达 10k+ 像素 | Tiled Diffusion / Multi-Diffusion |
 | **颜色准确性** | 屏幕显示与实体印花存在色差 | ICC 色彩配置文件、Pantone 匹配 |
-| **无缝性** | AI 生成的图通常不具备周期性边界 | 后处理无缝化（如本项目）或 Toroidal Attention |
+| **无缝性** | AI 生图的图通常不具备周期性边界 | 后处理无缝化（如本项目）或 Toroidal Attention |
 
 ---
 
@@ -560,7 +560,7 @@ AI Provider 的 API Key 通过环境变量读取，不写入代码或数据库�
 
 > 本附录基于 DuckDuckGo（ddgs）免费搜索整理，共收录约 55 篇技术文章、论文与官方文档，
 
-> 覆盖图像分割、纹理合成、AI 生成、Web 架构、前端交互、数据存储与服装产业数字化。
+> 覆盖图像分割、纹理合成、AI 生图、Web 架构、前端交互、数据存储与服装产业数字化。
 
 
 ## 10.1 计算机视觉与图像分割（15 篇）
