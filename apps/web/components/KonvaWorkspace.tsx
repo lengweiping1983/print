@@ -2015,14 +2015,13 @@ function LayoutPieceTexture({
       maskImage={alphaMask}
       frame={{ x: piece.source_x, y: piece.source_y, width: piece.width, height: piece.height }}
       zoom={zoom}
-      opacity={piece.mirror_of ? 0.45 : 1}
+      opacity={1}
       onSelect={onSelect}
     />
   );
 }
 
 function PieceOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piece; selected: boolean; outlineWidth: number; onSelect: () => void }) {
-  const isLinked = Boolean(piece.mirror_of);
   return (
     <>
       <Rect
@@ -2033,11 +2032,11 @@ function PieceOutline({ piece, selected, outlineWidth, onSelect }: { piece: Piec
         stroke="#e05252"
         strokeWidth={outlineWidth}
         strokeScaleEnabled={false}
-        opacity={selected ? (isLinked ? 0.5 : 1) : (isLinked ? 0.25 : 0.55)}
+        opacity={selected ? 1 : 0.55}
         onClick={onSelect}
         onTap={onSelect}
       />
-      <Text x={piece.source_x + 8} y={piece.source_y + 8} text={piece.name} fill="#e05252" fontSize={14} opacity={isLinked ? 0.5 : 1} />
+      <Text x={piece.source_x + 8} y={piece.source_y + 8} text={piece.name} fill="#e05252" fontSize={14} opacity={1} />
     </>
   );
 }

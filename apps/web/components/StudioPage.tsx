@@ -7,7 +7,7 @@ import type { SetStateAction } from "react";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { api, waitForJob } from "@/lib/api";
 import { JOB_TYPE_LABELS, JOB_STATUS_LABELS } from "@/lib/labels";
-import { LayoutPreviewLoading, LayerEditor, Panel, ResourceBar, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
+import { AssetThumb, AssetPickerPopover, LayoutPreviewLoading, LayerEditor, Panel, ResourceBar, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
 
 const SinglePieceCalibration = dynamic(() => import("./KonvaWorkspace").then((mod) => mod.SinglePieceCalibration), {
   ssr: false,
@@ -87,6 +87,8 @@ type StudioState = {
   globalLocked: boolean;
   singlePieceZoom: number;
   singleDragSnapEnabled: boolean;
+  showTexturePicker: boolean;
+  showLayerPicker: boolean;
 };
 
 type StudioAction =
@@ -133,7 +135,9 @@ const initialStudioState: StudioState = {
   globalFitDefaults: { texture_scale: 1, texture_angle: 0, texture_offset_x: 0, texture_offset_y: 0 },
   globalLocked: false,
   singlePieceZoom: 1,
-  singleDragSnapEnabled: true
+  singleDragSnapEnabled: true,
+  showTexturePicker: false,
+  showLayerPicker: false
 };
 
 function studioReducer(state: StudioState, action: StudioAction): StudioState {
@@ -185,7 +189,9 @@ export function StudioPage() {
     globalFitDefaults,
     globalLocked,
     singlePieceZoom,
-    singleDragSnapEnabled
+    singleDragSnapEnabled,
+    showTexturePicker,
+    showLayerPicker
   } = state;
   const setField = <K extends keyof StudioState>(field: K, value: SetStateAction<StudioState[K]>) => {
     dispatch({ type: "setField", field, value: value as SetStateAction<StudioState[keyof StudioState]> });
@@ -230,6 +236,8 @@ export function StudioPage() {
   const setGlobalLocked = (value: SetStateAction<boolean>) => setField("globalLocked", value);
   const setSinglePieceZoom = (value: SetStateAction<number>) => setField("singlePieceZoom", value);
   const setSingleDragSnapEnabled = (value: SetStateAction<boolean>) => setField("singleDragSnapEnabled", value);
+  const setShowTexturePicker = (value: SetStateAction<boolean>) => setField("showTexturePicker", value);
+  const setShowLayerPicker = (value: SetStateAction<boolean>) => setField("showLayerPicker", value);
   const prevJobRef = useRef<Job | null>(null);
   const layerRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fabricInputRef = useRef<HTMLInputElement | null>(null);
@@ -894,6 +902,44 @@ export function StudioPage() {
                       event.currentTarget.value = "";
                     }}
                   />
+                  {textures.length > 0 && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-slate-500">
+                        已选面料：{textures.findIndex((t) => t.id === activeTexture?.id) + 1} / {textures.length}
+                      </span>
+                      <button
+                        type="button"
+                        className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line"
+                        onClick={() => setShowTexturePicker(true)}
+                      >
+                        选择面料
+                      </button>
+                    </div>
+                  )}
+                  <AssetPickerPopover
+                    open={showTexturePicker}
+                    onClose={() => setShowTexturePicker(false)}
+                    title="选择面料"
+                  >
+                    <div className="flex flex-wrap gap-2">
+                      {textures.map((t) => {
+                        const thumb = t.design_canvas_url || t.seamless_url || t.source_url;
+                        return (
+                          <AssetThumb
+                            key={t.id}
+                            id={`tp-${t.id}`}
+                            url={thumb || ""}
+                            selected={t.id === activeTexture?.id}
+                            onSelect={() => {
+                              handleSelectTexture(t.id);
+                              setShowTexturePicker(false);
+                            }}
+                            onDelete={() => handleDeleteTexture(t.id)}
+                          />
+                        );
+                      })}
+                    </div>
+                  </AssetPickerPopover>
                   <div className="relative">
                     {activeTexture ? (
                       <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前面料" />
@@ -1100,6 +1146,41 @@ export function StudioPage() {
                     先完成“自动适配面料”，生成全局设计画布后，可添加 logo、主图或号码文字。
                   </p>
                 )}
+                {designLayers.filter((l) => l.type === "image").length > 0 && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-slate-500">
+                      已选图片层：{selectedLayer?.type === "image" ? selectedLayer.name : "无"}
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line"
+                      onClick={() => setShowLayerPicker(true)}
+                    >
+                      选择图片层
+                    </button>
+                  </div>
+                )}
+                <AssetPickerPopover
+                  open={showLayerPicker}
+                  onClose={() => setShowLayerPicker(false)}
+                  title="选择图片层"
+                >
+                  <div className="flex flex-wrap gap-2">
+                    {designLayers.filter((l) => l.type === "image").map((layer) => (
+                      <AssetThumb
+                        key={layer.id}
+                        id={`lp-${layer.id}`}
+                        url={layer.source_url || ""}
+                        selected={layer.id === selectedLayerId}
+                        onSelect={() => {
+                          setSelectedLayerId(layer.id);
+                          setShowLayerPicker(false);
+                        }}
+                        onDelete={() => deleteLayer(layer.id)}
+                      />
+                    ))}
+                  </div>
+                </AssetPickerPopover>
                 <div className="grid gap-2">
                   {designLayers.map((layer) => {
                     const layerImageUrl = layer.source_url || (layer.asset_id ? assets.find((a) => a.id === layer.asset_id)?.url : "") || "";

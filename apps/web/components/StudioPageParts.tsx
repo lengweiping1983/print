@@ -1,7 +1,7 @@
 "use client";
 
 import type { DesignCanvas, DesignLayer, Job, Piece, SafetyReportItem, Texture } from "@print-studio/shared-types";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PIECE_ROLE_LABELS } from "@/lib/labels";
 
@@ -300,6 +300,84 @@ function useHoverPreview() {
   };
 
   return { preview, register };
+}
+
+export function AssetThumb({
+  id,
+  url,
+  selected,
+  onSelect,
+  onDelete,
+}: {
+  id: string;
+  url: string;
+  selected?: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+}) {
+  const { preview, register } = useHoverPreview();
+  return (
+    <div ref={register(id, url)} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`block h-14 w-14 overflow-hidden rounded-lg border-2 ${selected ? "border-action" : "border-transparent"} bg-slate-50`}
+      >
+        {url ? (
+          <img src={url} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">无图</div>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        className="absolute -right-1.5 -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs text-slate-500 shadow hover:text-coral ring-1 ring-line"
+        title="删除"
+      >
+        ×
+      </button>
+      {preview && <PreviewPortal url={preview.url} rect={preview.rect} />}
+    </div>
+  );
+}
+
+export function AssetPickerPopover({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <div ref={ref} className="w-full max-w-2xl rounded-xl border border-line bg-white p-4 shadow-panel">
+        {title && <div className="mb-3 text-sm font-semibold text-slate-700">{title}</div>}
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 export function ResourceBar({

@@ -489,7 +489,6 @@ def set_base_size(set_id: str, size_template_id: str = Form(...)) -> dict:
     return get_template_set_row(set_id)
 
 
-@app.post("/api/template-sets/{set_id}/confirm-mapping")
 def clear_derived_transforms(set_id: str) -> None:
     with connect() as con:
         con.execute(
@@ -504,6 +503,7 @@ def clear_derived_transforms(set_id: str) -> None:
         )
 
 
+@app.post("/api/template-sets/{set_id}/confirm-mapping")
 def confirm_template_set_mapping(set_id: str) -> dict:
     ensure_template_set(set_id)
     with connect() as con:
