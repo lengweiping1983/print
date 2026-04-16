@@ -447,11 +447,48 @@ def make_mirror_tile(source_path: Path, out_path: Path, width: int, height: int)
     with Image.open(source_path).convert("RGBA") as src:
         tile = make_mirror_tile_image(src)
         out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        for y in range(0, height, tile.height):
-            for x in range(0, width, tile.width):
-                out.alpha_composite(tile, (x, y))
+        paint_tiled(out, tile, 0, 0)
         out.save(out_path)
     return width, height
+
+
+def make_repeated_tile_image(tile: Image.Image, repeat_cols: int, repeat_rows: int) -> Image.Image:
+    repeat_cols = max(1, int(repeat_cols))
+    repeat_rows = max(1, int(repeat_rows))
+    if repeat_cols == 1 and repeat_rows == 1:
+        return tile.copy()
+    repeated = Image.new("RGBA", (tile.width * repeat_cols, tile.height * repeat_rows), (0, 0, 0, 0))
+    for y in range(0, repeated.height, tile.height):
+        for x in range(0, repeated.width, tile.width):
+            repeated.alpha_composite(tile, (x, y))
+    return repeated
+
+
+def paint_tiled(canvas: Image.Image, tile: Image.Image, start_x: int, start_y: int, step_w: int | None = None, step_h: int | None = None) -> None:
+    step_w = max(1, int(step_w or tile.width))
+    step_h = max(1, int(step_h or tile.height))
+    cols, rows = repeated_tile_counts(canvas.size, (step_w, step_h))
+    paint_tile = make_repeated_tile_image(tile, cols, rows)
+    paint_step_w = step_w * cols
+    paint_step_h = step_h * rows
+    for y in range(start_y, canvas.height + paint_step_h, paint_step_h):
+        for x in range(start_x, canvas.width + paint_step_w, paint_step_w):
+            canvas.alpha_composite(paint_tile, (x, y))
+    paint_tile.close()
+
+
+def repeated_tile_counts(canvas_size: tuple[int, int], tile_size: tuple[int, int], max_repeat: int = 4) -> tuple[int, int]:
+    canvas_w, canvas_h = canvas_size
+    tile_w, tile_h = tile_size
+    repeat_cols = _repeat_count_for_axis(canvas_w, tile_w, max_repeat)
+    repeat_rows = _repeat_count_for_axis(canvas_h, tile_h, max_repeat)
+    return repeat_cols, repeat_rows
+
+
+def _repeat_count_for_axis(canvas_length: int, tile_length: int, max_repeat: int) -> int:
+    if tile_length <= 0 or canvas_length <= tile_length * 2:
+        return 1
+    return max(1, min(max_repeat, math.ceil(canvas_length / tile_length)))
 
 
 def make_mirror_tile_image(src: Image.Image) -> Image.Image:
@@ -468,9 +505,7 @@ def make_offset_tile(source_path: Path, out_path: Path, width: int, height: int)
     ensure_dimensions_within_limit(width, height)
     with Image.open(source_path).convert("RGBA") as src:
         canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        for y in range(0, height + src.height, src.height):
-            for x in range(0, width + src.width, src.width):
-                canvas.alpha_composite(src, (x - src.width // 2, y - src.height // 2))
+        paint_tiled(canvas, src, -src.width // 2, -src.height // 2)
         canvas = ImageChops.offset(canvas, width // 2, height // 2)
         canvas.save(out_path)
     return width, height
@@ -508,9 +543,7 @@ def render_piece_image(mask_path: Path, texture_path: Path, transform: dict) -> 
     offset_y = int(float(transform.get("offset_y", 0) or 0))
     start_x = -tile.width + (offset_x % max(1, tile.width))
     start_y = -tile.height + (offset_y % max(1, tile.height))
-    for y in range(start_y, mask.height + tile.height, tile.height):
-        for x in range(start_x, mask.width + tile.width, tile.width):
-            canvas.alpha_composite(tile, (x, y))
+    paint_tiled(canvas, tile, start_x, start_y)
     canvas.putalpha(mask)
     composite_piece_markers(canvas, mask_path)
     mask.close()

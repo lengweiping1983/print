@@ -5,7 +5,7 @@ from typing import Any
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
-from .image_ops import ensure_dimensions_within_limit, ensure_image_within_limit, make_mirror_tile_image
+from .image_ops import ensure_dimensions_within_limit, ensure_image_within_limit, make_mirror_tile_image, paint_tiled
 
 
 def build_design_texture_canvas(
@@ -37,9 +37,7 @@ def build_design_texture_canvas(
         if tile_enabled:
             start_x = -tile.width + (offset_x % max(1, tile.width))
             start_y = -tile.height + (offset_y % max(1, tile.height))
-            for y in range(start_y, height + tile.height, tile.height):
-                for x in range(start_x, width + tile.width, tile.width):
-                    canvas.alpha_composite(tile, (x, y))
+            paint_tiled(canvas, tile, start_x, start_y)
         else:
             canvas.alpha_composite(tile, ((width - tile.width) // 2 + offset_x, (height - tile.height) // 2 + offset_y))
 

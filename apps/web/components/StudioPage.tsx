@@ -1,6 +1,7 @@
 "use client";
 
 import type { Asset, DesignCanvas, DesignLayer, GlobalFitOptions, Job, Piece, PieceTransform, Project, SizeTemplate, TemplateSet, Texture } from "@print-studio/shared-types";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import type { SetStateAction } from "react";
 import { useEffect, useMemo, useReducer, useRef } from "react";
@@ -911,7 +912,16 @@ export function StudioPage() {
       {showTemplateDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-lg border border-line bg-white p-5 shadow-panel">
-            <h2 className="mb-4 text-lg font-bold">从模板套装创建项目</h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold">从模板套装创建项目</h2>
+              <Link
+                href="/templates"
+                target="_blank"
+                className="text-sm text-action hover:underline"
+              >
+                管理套装
+              </Link>
+            </div>
             <div className="mb-3">
               <label className="mb-1 block text-sm font-semibold">选择套装</label>
               <select

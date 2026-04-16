@@ -2,13 +2,17 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from app.design_ops import build_design_texture_canvas
 from app.image_ops import (
     _collect_component_spans,
     extract_alpha_components,
     make_layout_template,
     make_mirror_tile,
+    make_offset_tile,
+    make_repeated_tile_image,
     make_red_marker_mask,
     marker_path_for_mask,
+    repeated_tile_counts,
     render_layout,
     render_piece,
     render_piece_from_design_canvas,
@@ -123,6 +127,111 @@ def test_render_layout_with_texture(tmp_path: Path) -> None:
     assert out.exists()
     assert Image.open(out).size == (120, 100)
     assert not list(tmp_path.glob("_*.png"))
+
+
+def test_build_design_texture_canvas_tiling_keeps_offset_pixels(tmp_path: Path) -> None:
+    texture = tmp_path / "tile.png"
+    tile = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+    pixels = tile.load()
+    assert pixels is not None
+    for y in range(4):
+        for x in range(4):
+            pixels[x, y] = (x * 50, y * 50, 120, 255)
+    tile.save(texture)
+
+    out = tmp_path / "design.png"
+    build_design_texture_canvas(
+        texture,
+        out,
+        {
+            "width": 64,
+            "height": 48,
+            "texture_scale": 1,
+            "texture_offset_x": 3,
+            "texture_offset_y": 2,
+            "tile": True,
+            "mirror": False,
+            "global_texture_angle": 0,
+            "design_anchors": {},
+        },
+    )
+
+    rendered = Image.open(out).convert("RGBA")
+    start_x = -4 + (3 % 4)
+    start_y = -4 + (2 % 4)
+    for point in [(0, 0), (13, 7), (42, 31)]:
+        x, y = point
+        expected_x = (x - start_x) % 4
+        expected_y = (y - start_y) % 4
+        assert rendered.getpixel(point) == tile.getpixel((expected_x, expected_y))
+
+
+def test_render_piece_tiling_keeps_local_offset_pixels(tmp_path: Path) -> None:
+    mask = tmp_path / "piece_mask.png"
+    Image.new("L", (20, 16), 255).save(mask)
+    texture = tmp_path / "texture.png"
+    tile = Image.new("RGBA", (5, 4), (0, 0, 0, 0))
+    pixels = tile.load()
+    assert pixels is not None
+    for y in range(4):
+        for x in range(5):
+            pixels[x, y] = (x * 30, y * 40, 200, 255)
+    tile.save(texture)
+
+    out = tmp_path / "piece.png"
+    render_piece(mask, texture, {"offset_x": 2, "offset_y": 3, "scale": 1, "rotation": 0}, out)
+
+    rendered = Image.open(out).convert("RGBA")
+    start_x = -5 + (2 % 5)
+    start_y = -4 + (3 % 4)
+    for point in [(0, 0), (8, 5), (19, 15)]:
+        x, y = point
+        expected_x = (x - start_x) % 5
+        expected_y = (y - start_y) % 4
+        assert rendered.getpixel(point) == tile.getpixel((expected_x, expected_y))
+
+
+def test_make_mirror_tile_keeps_quadrant_mirroring(tmp_path: Path) -> None:
+    texture = tmp_path / "texture.png"
+    src = Image.new("RGBA", (2, 2), (0, 0, 0, 0))
+    src.putpixel((0, 0), (255, 0, 0, 255))
+    src.putpixel((1, 0), (0, 255, 0, 255))
+    src.putpixel((0, 1), (0, 0, 255, 255))
+    src.putpixel((1, 1), (255, 255, 0, 255))
+    src.save(texture)
+
+    out = tmp_path / "mirror.png"
+    make_mirror_tile(texture, out, 8, 8)
+
+    rendered = Image.open(out).convert("RGBA")
+    assert rendered.size == (8, 8)
+    assert rendered.getpixel((0, 0)) == (255, 0, 0, 255)
+    assert rendered.getpixel((2, 0)) == (0, 255, 0, 255)
+    assert rendered.getpixel((0, 2)) == (0, 0, 255, 255)
+    assert rendered.getpixel((2, 2)) == (255, 255, 0, 255)
+    assert rendered.getpixel((4, 0)) == (255, 0, 0, 255)
+
+
+def test_make_offset_tile_keeps_full_coverage(tmp_path: Path) -> None:
+    texture = tmp_path / "texture.png"
+    Image.new("RGBA", (8, 8), (20, 80, 160, 255)).save(texture)
+
+    out = tmp_path / "offset.png"
+    make_offset_tile(texture, out, 40, 32)
+
+    rendered = Image.open(out).convert("RGBA")
+    assert rendered.size == (40, 32)
+    assert rendered.getchannel("A").getextrema() == (255, 255)
+
+
+def test_repeated_tile_helpers_expand_small_tiles_only() -> None:
+    assert repeated_tile_counts((100, 80), (5, 6)) == (4, 4)
+    assert repeated_tile_counts((100, 80), (60, 50)) == (1, 1)
+
+    tile = Image.new("RGBA", (5, 6), (20, 80, 160, 255))
+    repeated = make_repeated_tile_image(tile, 4, 4)
+    assert repeated.size == (20, 24)
+    repeated.close()
 
 
 def test_render_piece_from_design_canvas_samples_shared_region(tmp_path: Path) -> None:
