@@ -49,8 +49,14 @@ export function LayerEditor({
   onDelete: () => void;
 }) {
   const roles = Array.from(new Set(pieces.map((piece) => piece.transform.piece_role).filter(Boolean))) as string[];
+  const layerImageUrl = layer.source_url || "";
   return (
     <div className="grid gap-3 rounded-lg border border-line p-3">
+      {layer.type === "image" && layerImageUrl && (
+        <div className="flex justify-center rounded-lg border border-line bg-white p-2">
+          <img className="max-h-32 rounded-md object-contain" src={layerImageUrl} alt="" />
+        </div>
+      )}
       <label className="grid gap-1 text-sm font-semibold">
         <span>图层名称</span>
         <input className="rounded-lg border border-line px-3 py-2" value={layer.name} onChange={(event) => onChange({ name: event.target.value })} />

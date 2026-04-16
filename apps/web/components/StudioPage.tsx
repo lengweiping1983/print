@@ -541,7 +541,7 @@ export function StudioPage() {
     const asset = await api.uploadAsset(project.id, "pattern", file);
     setAssets((current) => [asset, ...current]);
     const layer = createLayer("image", designCanvas, asset);
-    const next = { ...designCanvas, layers: [...designLayers, layer] };
+    const next = { ...designCanvas, layers: [layer, ...designLayers] };
     const previousSelectedLayerId = selectedLayerId;
     setSelectedLayerId(layer.id);
     await saveDesignCanvas(next, true, previousSelectedLayerId);
@@ -564,12 +564,12 @@ export function StudioPage() {
       const height = Math.min(520, Math.max(180, texture.height || 360));
       const anchor = designCanvas.design_anchors?.[designCanvas.anchor] || { x: designCanvas.width / 2, y: designCanvas.height / 2 };
       layer.name = "AI 图片层";
-      layer.source_url = texture.source_url;
+      layer.source_url = texture.source_url || (texture.source_path ? `/files/${texture.source_path}` : "");
       layer.width = width;
       layer.height = height;
       layer.x = Math.round(anchor.x - width / 2);
       layer.y = Math.round(anchor.y - height / 2);
-      const next = { ...designCanvas, layers: [...designLayers, layer] };
+      const next = { ...designCanvas, layers: [layer, ...designLayers] };
       const previousSelectedLayerId = selectedLayerId;
       setSelectedLayerId(layer.id);
       await saveDesignCanvas(next, true, previousSelectedLayerId);
@@ -990,6 +990,9 @@ export function StudioPage() {
             title="图层"
             action={
               <div className="flex gap-2">
+                <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold text-ink ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
+                  添加文字层
+                </button>
                 <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => layerImageInputRef.current?.click()}>
                   上传图片
                 </button>
@@ -1011,37 +1014,37 @@ export function StudioPage() {
                   event.currentTarget.value = "";
                 }}
               />
-              <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
-                添加文字层
-              </button>
               {designLayers.length === 0 && (
                 <p className="m-0 text-xs leading-5 text-slate-500">
                   先完成“自动适配纹理”，生成全局设计画布后，可添加 logo、主图或号码文字。
                 </p>
               )}
               <div className="grid gap-2">
-                {designLayers.map((layer) => (
-                  <button
-                    key={layer.id}
-                    className={`rounded-lg border px-3 py-2 text-left ${layer.id === selectedLayerId ? "border-jade bg-emerald-50" : "border-line bg-white"}`}
-                    onClick={() => setSelectedLayerId(layer.id)}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="block truncate font-semibold">{layer.name}</span>
-                        <span className="text-xs text-slate-500">{layer.type === "image" ? "图片层" : "文字层"} · {layer.visible ? "显示" : "隐藏"} · {layer.locked ? "锁定" : "可编辑"}</span>
-                      </div>
-                      {layer.type === "image" && layer.source_url && (
-                        <div className="group relative shrink-0">
-                          <img className="h-10 w-10 rounded-md object-cover" src={layer.source_url} alt="" />
-                          <div className="pointer-events-none absolute bottom-full right-0 z-50 mb-1 hidden rounded-lg border border-line bg-white p-1 shadow-lg group-hover:block">
-                            <img className="max-h-40 max-w-40 rounded-md object-contain" src={layer.source_url} alt="" />
-                          </div>
+                {designLayers.map((layer) => {
+                  const layerImageUrl = layer.source_url || (layer.asset_id ? assets.find((a) => a.id === layer.asset_id)?.url : "") || "";
+                  return (
+                    <button
+                      key={layer.id}
+                      className={`rounded-lg border px-3 py-2 text-left ${layer.id === selectedLayerId ? "border-jade bg-emerald-50" : "border-line bg-white"}`}
+                      onClick={() => setSelectedLayerId(layer.id)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="block truncate font-semibold">{layer.name}</span>
+                          <span className="text-xs text-slate-500">{layer.type === "image" ? "图片层" : "文字层"} · {layer.visible ? "显示" : "隐藏"} · {layer.locked ? "锁定" : "可编辑"}</span>
                         </div>
-                      )}
-                    </div>
-                  </button>
-                ))}
+                        {layer.type === "image" && layerImageUrl && (
+                          <div className="group relative shrink-0">
+                            <img className="h-10 w-10 rounded-md object-cover" src={layerImageUrl} alt="" />
+                            <div className="pointer-events-none absolute bottom-full right-0 z-50 mb-1 hidden rounded-lg border border-line bg-white p-1 shadow-lg group-hover:block">
+                              <img className="max-h-40 max-w-40 rounded-md object-contain" src={layerImageUrl} alt="" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
               {selectedLayer && (
                 <LayerEditor
