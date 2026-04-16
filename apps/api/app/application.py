@@ -45,6 +45,7 @@ from .schemas import (
     AutoMapRequest,
     DesignCanvasPatch,
     ExportRequest,
+    FabricPromptOut,
     GlobalFitRequest,
     JobOut,
     PieceOut,
@@ -1114,6 +1115,13 @@ def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dic
         )
 
     return get_project_dict(project_id)
+
+
+@app.get("/api/fabric-prompts", response_model=list[FabricPromptOut])
+def list_fabric_prompts() -> list[dict]:
+    with connect() as con:
+        rows = con.execute("select id, code, name, scenarios, prompt, sort_order from fabric_prompts order by sort_order").fetchall()
+    return [row_to_dict(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------

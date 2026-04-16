@@ -1,10 +1,10 @@
 "use client";
 
-import type { Asset, DesignCanvas, DesignLayer, GlobalFitOptions, Job, Piece, PieceTransform, Project, SizeTemplate, TemplateSet, Texture } from "@print-studio/shared-types";
+import type { Asset, DesignCanvas, DesignLayer, FabricPrompt, GlobalFitOptions, Job, Piece, PieceTransform, Project, SizeTemplate, TemplateSet, Texture } from "@print-studio/shared-types";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import type { SetStateAction } from "react";
-import { useEffect, useMemo, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { api, waitForJob } from "@/lib/api";
 import { JOB_TYPE_LABELS, JOB_STATUS_LABELS } from "@/lib/labels";
 import { LayoutPreviewLoading, LayerEditor, Panel, SafetyReportList, SinglePieceLoading, ToastNotice } from "./StudioPageParts";
@@ -84,7 +84,7 @@ const initialStudioState: StudioState = {
   pieces: [],
   textures: [],
   selectedPieceId: "",
-  prompt: "深蓝底色，花卉与飞鹤纹样，适合男士衬衫裁片打样",
+  prompt: "",
   job: null,
   notice: "正在准备工作台...",
   showAiTextureDialog: false,
@@ -198,6 +198,36 @@ export function StudioPage() {
   const layerRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fabricInputRef = useRef<HTMLInputElement | null>(null);
   const garmentInputRef = useRef<HTMLInputElement | null>(null);
+  const aiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const [fabricPrompts, setFabricPrompts] = useState<FabricPrompt[]>([]);
+  const [showPromptMenu, setShowPromptMenu] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [aiResolution, setAiResolution] = useState<"1K" | "2K" | "4K">("2K");
+  const [aiRatio, setAiRatio] = useState<"1:1" | "9:16" | "16:9" | "3:4" | "4:3">("1:1");
+  const [showParamMenu, setShowParamMenu] = useState(false);
+  const paramMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.listFabricPrompts().then((data) => {
+      if (active) setFabricPrompts(data);
+    }).catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showParamMenu) return;
+    function handleDocClick(event: MouseEvent) {
+      if (paramMenuRef.current && !paramMenuRef.current.contains(event.target as Node)) {
+        setShowParamMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleDocClick);
+    return () => document.removeEventListener("mousedown", handleDocClick);
+  }, [showParamMenu]);
 
   useEffect(() => {
     let active = true;
@@ -636,7 +666,22 @@ export function StudioPage() {
             </div>
           </Panel>
 
-          <Panel title="纹理">
+          <Panel
+            title="纹理"
+            action={
+              <div className="flex gap-2">
+                <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
+                  上传布料
+                </button>
+                <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
+                  上传衣服
+                </button>
+                <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => setShowAiTextureDialog(true)}>
+                  AI 生图
+                </button>
+              </div>
+            }
+          >
             <div className="space-y-2">
               <input
                 ref={fabricInputRef}
@@ -661,21 +706,10 @@ export function StudioPage() {
                 }}
               />
               <div className="relative">
-                <div className="absolute left-0 right-0 top-2 z-10 flex justify-center gap-2">
-                  <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
-                    上传布料
-                  </button>
-                  <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
-                    上传衣服
-                  </button>
-                  <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => setShowAiTextureDialog(true)}>
-                    AI 生图
-                  </button>
-                </div>
                 {activeTexture ? (
-                  <img className="checkerboard h-40 w-full rounded-lg object-contain pt-8" src={selectedInputTextureUrl} alt="当前纹理" />
+                  <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前纹理" />
                 ) : (
-                  <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line pt-8 text-sm text-slate-500">
+                  <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm text-slate-500">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                       <circle cx="8.5" cy="8.5" r="1.5" />
@@ -926,7 +960,7 @@ export function StudioPage() {
       {showAiTextureDialog && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-4">
           <form
-            className="w-full max-w-2xl rounded-lg border border-white/10 bg-zinc-900 p-4 text-white shadow-panel"
+            className="relative w-full max-w-2xl rounded-lg border border-white/10 bg-zinc-900 p-4 text-white shadow-panel"
             onSubmit={(event) => {
               event.preventDefault();
               void handleTexture("ai");
@@ -948,19 +982,110 @@ export function StudioPage() {
                 x
               </button>
             </div>
-            <textarea
-              className="min-h-28 w-full resize-y rounded-lg border border-transparent bg-transparent px-1 py-2 text-sm text-white outline-none placeholder:text-zinc-500"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="描述你想要生成的画面内容，按 / 呼出指令，@ 引用素材"
-              autoFocus
-            />
+            <div className="relative">
+              <textarea
+                ref={aiTextareaRef}
+                className="min-h-28 w-full resize-y rounded-lg border border-transparent bg-transparent px-1 py-2 text-sm text-white outline-none placeholder:text-zinc-500"
+                value={prompt}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setPrompt(value);
+                  if (value.endsWith("/")) {
+                    setShowPromptMenu(true);
+                    setHighlightedIndex(0);
+                  } else {
+                    setShowPromptMenu(false);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (!showPromptMenu || fabricPrompts.length === 0) return;
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setHighlightedIndex((i) => (i + 1) % fabricPrompts.length);
+                  } else if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setHighlightedIndex((i) => (i - 1 + fabricPrompts.length) % fabricPrompts.length);
+                  } else if (event.key === "Enter") {
+                    event.preventDefault();
+                    const selected = fabricPrompts[highlightedIndex];
+                    if (selected) {
+                      setPrompt(selected.prompt);
+                      setShowPromptMenu(false);
+                      setHighlightedIndex(0);
+                    }
+                  } else if (event.key === "Escape") {
+                    setShowPromptMenu(false);
+                  }
+                }}
+                placeholder="描述你想要生成的画面内容，按 / 呼出指令，@ 引用素材"
+                autoFocus
+              />
+              {showPromptMenu && fabricPrompts.length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-white/10 bg-zinc-800 py-1 shadow-lg">
+                  {fabricPrompts.map((item, index) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`w-full px-3 py-2 text-left text-sm ${index === highlightedIndex ? "bg-white/10" : "hover:bg-white/5"}`}
+                      onMouseEnter={() => setHighlightedIndex(index)}
+                      onClick={() => {
+                        setPrompt(item.prompt);
+                        setShowPromptMenu(false);
+                        setHighlightedIndex(0);
+                      }}
+                    >
+                      <span className="font-medium text-zinc-100">{item.name}</span>
+                      <span className="mx-1 text-zinc-500">·</span>
+                      <span className="text-zinc-400">适用场景：{item.scenarios}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-zinc-300">
-              <span>Lib Nano Pro</span>
-              <span className="rounded-md border border-white/15 px-2 py-1">16:9</span>
-              <span className="rounded-md border border-white/15 px-2 py-1">2K</span>
-              <span className="rounded-md border border-white/15 px-2 py-1">摄像机</span>
-              <span className="rounded-md border border-white/15 px-2 py-1">全景</span>
+              <span>Nano Banana Pro</span>
+              <div ref={paramMenuRef} className="relative">
+                <button
+                  type="button"
+                  className="rounded-md border border-white/15 px-2 py-1 hover:bg-white/5"
+                  onClick={() => setShowParamMenu((v) => !v)}
+                >
+                  {aiRatio} · {aiResolution}
+                </button>
+                {showParamMenu && (
+                  <div
+                    className="absolute bottom-full left-0 z-50 mb-1 w-56 rounded-lg border border-white/10 bg-zinc-800 p-2 shadow-lg"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="mb-2 text-[10px] text-zinc-500">分辨率</div>
+                    <div className="mb-3 flex gap-1">
+                      {(["1K", "2K", "4K"] as const).map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          className={`flex-1 rounded-md py-1 text-xs ${aiResolution === r ? "bg-white/20 text-white" : "text-zinc-400 hover:bg-white/10"}`}
+                          onClick={() => setAiResolution(r)}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mb-2 text-[10px] text-zinc-500">比例</div>
+                    <div className="flex flex-wrap gap-1">
+                      {(["1:1", "9:16", "16:9", "3:4", "4:3"] as const).map((rt) => (
+                        <button
+                          key={rt}
+                          type="button"
+                          className={`rounded-md px-2 py-1 text-xs ${aiRatio === rt ? "bg-white/20 text-white" : "text-zinc-400 hover:bg-white/10"}`}
+                          onClick={() => setAiRatio(rt)}
+                        >
+                          {rt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
               <span className="ml-auto rounded-md border border-white/15 px-2 py-1">1张</span>
               <button type="submit" className="rounded-lg bg-zinc-200 px-4 py-2 font-semibold text-zinc-900">
                 生成
