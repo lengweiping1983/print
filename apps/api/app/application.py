@@ -1296,7 +1296,10 @@ def _generate_texture_job(job_id: str, payload: dict) -> dict:
         height = int(payload.get("tile_height") or 2048)
         ensure_dimensions_within_limit(width, height)
         dst = textures_dir / f"{texture_id}_source.png"
-        provider = get_provider(payload.get("provider", "local"))
+        if neodomain._get_active_server_token():
+            provider = get_provider("neodomain")
+        else:
+            provider = get_provider(payload.get("provider", "local"))
         provider.generate_texture(payload.get("prompt") or "服装布料纹理", dst, width, height, payload.get("seed", ""))
         source_path = rel_path(dst)
     analysis = analyze_texture_fit_source(

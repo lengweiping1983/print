@@ -12,7 +12,7 @@ export const PIECE_ROLE_LABELS: Record<string, string> = {
 
 export const JOB_TYPE_LABELS: Record<string, string> = {
   template_import: "模板解析",
-  texture_generate: "纹理生成",
+  texture_generate: "图片生成",
   texture_seamless: "无缝化",
   render_preview: "预览渲染",
   export_render: "导出渲染",

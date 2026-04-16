@@ -377,9 +377,76 @@ type SinglePieceCalibrationProps = {
   onMovePiece: (piece: Piece, x: number, y: number) => void;
   onPatchTransform?: (transform: Partial<Piece["transform"]>) => void;
   onResetPiece?: () => void;
+  compact?: boolean;
+  pieceZoom?: number;
+  dragSnapEnabled?: boolean;
 };
 
-export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, designCanvas, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece, onPatchTransform, onResetPiece }: SinglePieceCalibrationProps) {
+export function SinglePieceToolbar({
+  showOutlines,
+  outlineWidth = 1,
+  designCanvas,
+  pieceZoom = 1,
+  dragSnapEnabled = true,
+  onToggleOutlines,
+  onOutlineWidthChange = () => {},
+  onZoomIn,
+  onZoomOut,
+  onToggleDragSnap = () => {}
+}: {
+  showOutlines: boolean;
+  outlineWidth?: number;
+  designCanvas?: DesignCanvas | null;
+  pieceZoom?: number;
+  dragSnapEnabled?: boolean;
+  onToggleOutlines: (visible: boolean) => void;
+  onOutlineWidthChange?: (width: number) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onToggleDragSnap: (enabled: boolean) => void;
+}) {
+  const snapSettings = useMemo(() => textureSnapSettings(designCanvas ?? null), [designCanvas]);
+  return (
+    <div className="flex items-center gap-2">
+      <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-ink ring-1 ring-line">
+        <input type="checkbox" className="peer sr-only" checked={showOutlines} onChange={(event) => onToggleOutlines(event.target.checked)} />
+        <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-jade">
+          <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
+        </span>
+        显示线框
+      </label>
+      {showOutlines && (
+        <select
+          className="rounded-lg border border-line bg-white px-2 py-1.5 text-sm font-semibold text-ink"
+          value={outlineWidth}
+          onChange={(event) => onOutlineWidthChange(Number(event.target.value))}
+        >
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => (
+            <option key={v} value={v}>{v}px</option>
+          ))}
+        </select>
+      )}
+      <label className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ring-1 ring-line ${snapSettings ? "cursor-pointer bg-white text-ink" : "cursor-not-allowed bg-slate-100 text-slate-400"}`}>
+        <input
+          type="checkbox"
+          className="peer sr-only"
+          checked={dragSnapEnabled && Boolean(snapSettings)}
+          onChange={(event) => onToggleDragSnap(event.target.checked)}
+          disabled={!snapSettings}
+        />
+        <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-action">
+          <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
+        </span>
+        拖动吸附
+      </label>
+      <ZoomButton label="-" onClick={onZoomOut} />
+      <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(pieceZoom * 100)}%</span>
+      <ZoomButton label="+" onClick={onZoomIn} />
+    </div>
+  );
+}
+
+export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, designCanvas, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece, onPatchTransform, onResetPiece, compact = false, pieceZoom = 1, dragSnapEnabled = true }: SinglePieceCalibrationProps) {
   const textureImage = useLoadedImage(textureUrl);
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
@@ -389,8 +456,6 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
     if (!alphaMaskImage) return null;
     return createOutlineCanvas(alphaMaskImage, outlineWidth, "#e05252");
   }, [alphaMaskImage, outlineWidth]);
-  const [pieceZoom, setPieceZoom] = useState(1);
-  const [dragSnapEnabled, setDragSnapEnabled] = useState(true);
   const [stageWrapRef, stageWrapSize] = useElementSize<HTMLDivElement>();
   const stageWidth = Math.max(320, Math.round(stageWrapSize.width || 520));
   const stageHeight = Math.max(440, Math.min(640, Math.round(stageWidth * 1.22)));
@@ -405,8 +470,12 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
   }, [selected, stageHeight, stageWidth]);
   const [activeToolbarPopover, setActiveToolbarPopover] = useState("");
   const [dragPreviewOffset, setDragPreviewOffset] = useState<{ pieceId: string; x: number; y: number } | null>(null);
+  const [localZoom, setLocalZoom] = useState(1);
+  const [localSnap, setLocalSnap] = useState(true);
+  const effectiveZoom = compact ? pieceZoom : localZoom;
+  const effectiveSnap = compact ? dragSnapEnabled : localSnap;
   const snapSettings = useMemo(() => textureSnapSettings(designCanvas ?? null), [designCanvas]);
-  const activeSnapSettings = dragSnapEnabled ? snapSettings : null;
+  const activeSnapSettings = effectiveSnap ? snapSettings : null;
   const displayPiece = useMemo(() => {
     if (!selected || dragPreviewOffset?.pieceId !== selected.id) return selected;
     return {
@@ -419,6 +488,160 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
     };
   }, [dragPreviewOffset, selected]);
 
+  const canvas = (
+    <div ref={stageWrapRef} className="relative overflow-hidden rounded-lg border border-line bg-white">
+      <Stage width={stageWidth} height={stageHeight}>
+        <Layer>
+          <Rect x={0} y={0} width={stageWidth} height={stageHeight} fill="#ffffff" />
+          {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
+          {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
+        </Layer>
+        {textureImage && displayPiece && selectedMaskFrame && (
+          <DimmedTextureLayer
+            piece={displayPiece}
+            textureImage={textureImage}
+            frame={selectedMaskFrame}
+            zoom={effectiveZoom}
+            stageWidth={stageWidth}
+            stageHeight={stageHeight}
+          />
+        )}
+        {textureImage && displayPiece && alphaMaskImage && selectedMaskFrame && (
+          <ClippedTextureLayer
+            piece={displayPiece}
+            textureImage={textureImage}
+            maskImage={alphaMaskImage}
+            frame={selectedMaskFrame}
+            zoom={effectiveZoom}
+            draggable={!displayPiece.mirror_of}
+            opacity={displayPiece.mirror_of ? 0.45 : 1}
+            snapSettings={activeSnapSettings}
+            onPreviewMove={(x, y) => setDragPreviewOffset({ pieceId: displayPiece.id, x, y })}
+            onMove={(x, y) => {
+              setDragPreviewOffset(null);
+              onMovePiece(selected, x, y);
+            }}
+            onMoveCancel={() => setDragPreviewOffset(null)}
+          />
+        )}
+        {showOutlines && outlineImage && selectedMaskFrame && (
+          <Layer scaleX={effectiveZoom} scaleY={effectiveZoom}>
+            <KonvaImage
+              image={outlineImage}
+              x={selectedMaskFrame.x}
+              y={selectedMaskFrame.y}
+              width={selectedMaskFrame.width}
+              height={selectedMaskFrame.height}
+              listening={false}
+            />
+          </Layer>
+        )}
+      </Stage>
+      {selected && onPatchTransform && !selected.mirror_of && (
+        <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
+          <ToolbarLockButton popoverId="single-lock" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} locked={selected.transform.locked} onToggle={() => onPatchTransform({ locked: !selected.transform.locked })} />
+          {onResetPiece && (
+            <ToolbarResetButton popoverId="single-reset" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} onReset={onResetPiece} disabled={selected.transform.locked} />
+          )}
+          <ToolbarSnapButton
+            popoverId="single-snap"
+            activePopover={activeToolbarPopover}
+            setActivePopover={setActiveToolbarPopover}
+            disabled={selected.transform.locked}
+            designCanvas={designCanvas ?? null}
+            piece={selected}
+            onPatchTransform={onPatchTransform}
+          />
+          <ToolbarCenterButton
+            popoverId="single-center"
+            activePopover={activeToolbarPopover}
+            setActivePopover={setActiveToolbarPopover}
+            disabled={selected.transform.locked}
+            piece={selected}
+            onPatchTransform={onPatchTransform}
+          />
+          <ToolbarOrientationButton
+            popoverId="single-orientation"
+            activePopover={activeToolbarPopover}
+            setActivePopover={setActiveToolbarPopover}
+            disabled={selected.transform.locked}
+            piece={selected}
+            onPatchTransform={onPatchTransform}
+          />
+          <PieceToolbarButton popoverId="single-x" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="X" value={selected.transform.offset_x ?? 0} disabled={selected.transform.locked}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-sm font-semibold">平移 X</span>
+              <span className="text-sm font-bold">{selected.transform.offset_x ?? 0}</span>
+            </div>
+            <input
+              type="range"
+              min={-2048}
+              max={2048}
+              value={selected.transform.offset_x ?? 0}
+              onChange={(e) => onPatchTransform({ offset_x: Number(e.target.value) })}
+              disabled={selected.transform.locked}
+              className="w-full accent-action"
+            />
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">左右移动裁片中的布料取样位置。</p>
+          </PieceToolbarButton>
+          <PieceToolbarButton popoverId="single-y" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="Y" value={selected.transform.offset_y ?? 0} disabled={selected.transform.locked}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-sm font-semibold">平移Y</span>
+              <span className="text-sm font-bold">{selected.transform.offset_y ?? 0}</span>
+            </div>
+            <input
+              type="range"
+              min={-2048}
+              max={2048}
+              value={selected.transform.offset_y ?? 0}
+              onChange={(e) => onPatchTransform({ offset_y: Number(e.target.value) })}
+              disabled={selected.transform.locked}
+              className="w-full accent-action"
+            />
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">上下移动裁片中的布料取样位置。</p>
+          </PieceToolbarButton>
+          <PieceToolbarButton popoverId="single-scale" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="缩" value={selected.transform.scale} disabled={selected.transform.locked}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-sm font-semibold">单片缩放</span>
+              <span className="text-sm font-bold">{selected.transform.scale.toFixed(2)}</span>
+            </div>
+            <input
+              type="range"
+              min={0.2}
+              max={6}
+              step={0.01}
+              value={selected.transform.scale}
+              onChange={(e) => onPatchTransform({ scale: Number(e.target.value) })}
+              disabled={selected.transform.locked}
+              className="w-full accent-action"
+            />
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">叠加在全局设计画布之后，只影响当前裁片，默认保持 1。</p>
+          </PieceToolbarButton>
+          <PieceToolbarButton popoverId="single-rotate" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="转" value={selected.transform.rotation} disabled={selected.transform.locked}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-sm font-semibold">单片旋转</span>
+              <span className="text-sm font-bold">{selected.transform.rotation}</span>
+            </div>
+            <input
+              type="range"
+              min={-180}
+              max={180}
+              value={selected.transform.rotation}
+              onChange={(e) => onPatchTransform({ rotation: Number(e.target.value) })}
+              disabled={selected.transform.locked}
+              className="w-full accent-action"
+            />
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">叠加在全局设计画布方向之后，只影响当前裁片，默认保持 0。</p>
+          </PieceToolbarButton>
+        </div>
+      )}
+    </div>
+  );
+
+  if (compact) {
+    return canvas;
+  }
+
   return (
     <section className="rounded-lg border border-line bg-white p-4 shadow-panel">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -426,190 +649,20 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
           <h2 className="m-0 text-lg font-semibold">单裁片校正</h2>
           <p className="m-0 mt-1 text-sm text-slate-500">拖动裁片中的布料，微调重点花位。</p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-ink ring-1 ring-line">
-            <input type="checkbox" className="peer sr-only" checked={showOutlines} onChange={(event) => onToggleOutlines(event.target.checked)} />
-            <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-jade">
-              <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
-            </span>
-            显示线框
-          </label>
-          {showOutlines && (
-            <select
-              className="rounded-lg border border-line bg-white px-2 py-1.5 text-sm font-semibold text-ink"
-              value={outlineWidth}
-              onChange={(event) => onOutlineWidthChange(Number(event.target.value))}
-            >
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((v) => (
-                <option key={v} value={v}>{v}px</option>
-              ))}
-            </select>
-          )}
-          <label className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ring-1 ring-line ${snapSettings ? "cursor-pointer bg-white text-ink" : "cursor-not-allowed bg-slate-100 text-slate-400"}`}>
-            <input
-              type="checkbox"
-              className="peer sr-only"
-              checked={dragSnapEnabled && Boolean(snapSettings)}
-              onChange={(event) => setDragSnapEnabled(event.target.checked)}
-              disabled={!snapSettings}
-            />
-            <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-action">
-              <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
-            </span>
-            拖动吸附
-          </label>
-          <ZoomButton label="-" onClick={() => setPieceZoom((zoom) => clampZoom(zoom - 0.1))} />
-          <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(pieceZoom * 100)}%</span>
-          <ZoomButton label="+" onClick={() => setPieceZoom((zoom) => clampZoom(zoom + 0.1))} />
-        </div>
+        <SinglePieceToolbar
+          showOutlines={showOutlines}
+          outlineWidth={outlineWidth}
+          designCanvas={designCanvas}
+          pieceZoom={localZoom}
+          dragSnapEnabled={localSnap}
+          onToggleOutlines={onToggleOutlines}
+          onOutlineWidthChange={onOutlineWidthChange}
+          onZoomIn={() => setLocalZoom((z) => clampZoom(z + 0.1))}
+          onZoomOut={() => setLocalZoom((z) => clampZoom(z - 0.1))}
+          onToggleDragSnap={setLocalSnap}
+        />
       </div>
-      <div ref={stageWrapRef} className="relative overflow-hidden rounded-lg border border-line bg-white">
-        <Stage width={stageWidth} height={stageHeight}>
-          <Layer>
-            <Rect x={0} y={0} width={stageWidth} height={stageHeight} fill="#ffffff" />
-            {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先导入裁片模板" fill="#64748b" fontSize={18} />}
-            {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成纹理" fill="#64748b" fontSize={18} />}
-          </Layer>
-          {textureImage && displayPiece && selectedMaskFrame && (
-            <DimmedTextureLayer
-              piece={displayPiece}
-              textureImage={textureImage}
-              frame={selectedMaskFrame}
-              zoom={pieceZoom}
-              stageWidth={stageWidth}
-              stageHeight={stageHeight}
-            />
-          )}
-          {textureImage && displayPiece && alphaMaskImage && selectedMaskFrame && (
-            <ClippedTextureLayer
-              piece={displayPiece}
-              textureImage={textureImage}
-              maskImage={alphaMaskImage}
-              frame={selectedMaskFrame}
-              zoom={pieceZoom}
-              draggable={!displayPiece.mirror_of}
-              opacity={displayPiece.mirror_of ? 0.45 : 1}
-              snapSettings={activeSnapSettings}
-              onPreviewMove={(x, y) => setDragPreviewOffset({ pieceId: displayPiece.id, x, y })}
-              onMove={(x, y) => {
-                setDragPreviewOffset(null);
-                onMovePiece(selected, x, y);
-              }}
-              onMoveCancel={() => setDragPreviewOffset(null)}
-            />
-          )}
-          {showOutlines && outlineImage && selectedMaskFrame && (
-            <Layer scaleX={pieceZoom} scaleY={pieceZoom}>
-              <KonvaImage
-                image={outlineImage}
-                x={selectedMaskFrame.x}
-                y={selectedMaskFrame.y}
-                width={selectedMaskFrame.width}
-                height={selectedMaskFrame.height}
-                listening={false}
-              />
-            </Layer>
-          )}
-        </Stage>
-        {selected && onPatchTransform && !selected.mirror_of && (
-          <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-2">
-            <ToolbarLockButton popoverId="single-lock" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} locked={selected.transform.locked} onToggle={() => onPatchTransform({ locked: !selected.transform.locked })} />
-            {onResetPiece && (
-              <ToolbarResetButton popoverId="single-reset" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} onReset={onResetPiece} disabled={selected.transform.locked} />
-            )}
-            <ToolbarSnapButton
-              popoverId="single-snap"
-              activePopover={activeToolbarPopover}
-              setActivePopover={setActiveToolbarPopover}
-              disabled={selected.transform.locked}
-              designCanvas={designCanvas ?? null}
-              piece={selected}
-              onPatchTransform={onPatchTransform}
-            />
-            <ToolbarCenterButton
-              popoverId="single-center"
-              activePopover={activeToolbarPopover}
-              setActivePopover={setActiveToolbarPopover}
-              disabled={selected.transform.locked}
-              piece={selected}
-              onPatchTransform={onPatchTransform}
-            />
-            <ToolbarOrientationButton
-              popoverId="single-orientation"
-              activePopover={activeToolbarPopover}
-              setActivePopover={setActiveToolbarPopover}
-              disabled={selected.transform.locked}
-              piece={selected}
-              onPatchTransform={onPatchTransform}
-            />
-            <PieceToolbarButton popoverId="single-x" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="X" value={selected.transform.offset_x ?? 0} disabled={selected.transform.locked}>
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-sm font-semibold">平移 X</span>
-                <span className="text-sm font-bold">{selected.transform.offset_x ?? 0}</span>
-              </div>
-              <input
-                type="range"
-                min={-2048}
-                max={2048}
-                value={selected.transform.offset_x ?? 0}
-                onChange={(e) => onPatchTransform({ offset_x: Number(e.target.value) })}
-                disabled={selected.transform.locked}
-                className="w-full accent-action"
-              />
-              <p className="mt-1.5 text-xs leading-5 text-slate-500">左右移动裁片中的布料取样位置。</p>
-            </PieceToolbarButton>
-            <PieceToolbarButton popoverId="single-y" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="Y" value={selected.transform.offset_y ?? 0} disabled={selected.transform.locked}>
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-sm font-semibold">平移Y</span>
-                <span className="text-sm font-bold">{selected.transform.offset_y ?? 0}</span>
-              </div>
-              <input
-                type="range"
-                min={-2048}
-                max={2048}
-                value={selected.transform.offset_y ?? 0}
-                onChange={(e) => onPatchTransform({ offset_y: Number(e.target.value) })}
-                disabled={selected.transform.locked}
-                className="w-full accent-action"
-              />
-              <p className="mt-1.5 text-xs leading-5 text-slate-500">上下移动裁片中的布料取样位置。</p>
-            </PieceToolbarButton>
-            <PieceToolbarButton popoverId="single-scale" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="缩" value={selected.transform.scale} disabled={selected.transform.locked}>
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-sm font-semibold">单片缩放</span>
-                <span className="text-sm font-bold">{selected.transform.scale.toFixed(2)}</span>
-              </div>
-              <input
-                type="range"
-                min={0.2}
-                max={6}
-                step={0.01}
-                value={selected.transform.scale}
-                onChange={(e) => onPatchTransform({ scale: Number(e.target.value) })}
-                disabled={selected.transform.locked}
-                className="w-full accent-action"
-              />
-              <p className="mt-1.5 text-xs leading-5 text-slate-500">叠加在全局设计画布之后，只影响当前裁片，默认保持 1。</p>
-            </PieceToolbarButton>
-            <PieceToolbarButton popoverId="single-rotate" activePopover={activeToolbarPopover} setActivePopover={setActiveToolbarPopover} label="转" value={selected.transform.rotation} disabled={selected.transform.locked}>
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-sm font-semibold">单片旋转</span>
-                <span className="text-sm font-bold">{selected.transform.rotation}</span>
-              </div>
-              <input
-                type="range"
-                min={-180}
-                max={180}
-                value={selected.transform.rotation}
-                onChange={(e) => onPatchTransform({ rotation: Number(e.target.value) })}
-                disabled={selected.transform.locked}
-                className="w-full accent-action"
-              />
-              <p className="mt-1.5 text-xs leading-5 text-slate-500">叠加在全局设计画布方向之后，只影响当前裁片，默认保持 0。</p>
-            </PieceToolbarButton>
-          </div>
-        )}
-      </div>
+      {canvas}
     </section>
   );
 }

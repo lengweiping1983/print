@@ -495,3 +495,71 @@ async def api_result(task_code: str, request: Request, x_access_token: Optional[
             _clear_runtime_token()
         status = getattr(error, "status_code", 500)
         return JSONResponse(_normalize_api_error(error, "查询结果失败"), status_code=status)
+
+
+def _closest_aspect_ratio(width: int, height: int) -> str:
+    ratio = width / height
+    candidates = [
+        ("1:1", 1.0),
+        ("16:9", 16 / 9),
+        ("9:16", 9 / 16),
+        ("4:3", 4 / 3),
+        ("3:4", 3 / 4),
+    ]
+    best = min(candidates, key=lambda item: abs(item[1] - ratio))
+    return best[0]
+
+
+def generate_image_sync(
+    prompt: str,
+    out_path: Path,
+    width: int = 1024,
+    height: int = 1024,
+    seed: str = "",
+) -> None:
+    import asyncio
+    import json as _json
+
+    access_token = _get_active_server_token()
+    if not access_token:
+        raise RuntimeError("缺少 neodomain access token")
+
+    async def _run() -> None:
+        payload_object: dict[str, Any] = {
+            "prompt": prompt,
+            "negativePrompt": "",
+            "modelName": DEFAULT_MODEL_NAME,
+            "imageUrls": [],
+            "aspectRatio": _closest_aspect_ratio(width, height),
+            "numImages": "1",
+            "outputFormat": "png",
+            "syncMode": True,
+            "safetyTolerance": "5",
+            "guidanceScale": 7.5,
+            "size": "2K",
+            "showPrompt": True,
+        }
+        if seed:
+            payload_object["seed"] = int(seed)
+        payload = _json.dumps(payload_object, ensure_ascii=False)
+        submit_result = await _request_json(
+            "POST",
+            f"{BASE_URL}/agent/ai-image-generation/generate",
+            headers={"Content-Type": "application/json", "accessToken": access_token},
+            body=payload,
+            timeout_ms=REQUEST_TIMEOUT_MS,
+        )
+        if not submit_result.get("success"):
+            raise RuntimeError(submit_result.get("errMessage") or "提交生成任务失败")
+        task_code = (submit_result.get("data") or {}).get("task_code")
+        if not task_code:
+            raise RuntimeError("服务端未返回 task_code")
+        result_data = await _poll_image_result(access_token, task_code)
+        urls = result_data.get("image_urls") or []
+        if not isinstance(urls, list):
+            urls = []
+        if not urls:
+            raise RuntimeError("未返回图片 URL")
+        await _download_file(urls[0], out_path)
+
+    asyncio.run(_run())

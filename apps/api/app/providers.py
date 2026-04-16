@@ -109,12 +109,28 @@ class ReplicateProvider(ImageProvider):
         raise RuntimeError("Timed out waiting for Replicate prediction")
 
 
+class NeodomainProvider(ImageProvider):
+    name = "neodomain"
+
+    def generate_texture(self, prompt: str, out_path: Path, width: int, height: int, seed: str = "") -> tuple[int, int]:
+        try:
+            from .neodomain import generate_image_sync
+            generate_image_sync(prompt, out_path, width, height, seed)
+            normalize_size(out_path, width, height)
+            return width, height
+        except Exception as exc:
+            logger.warning("Neodomain 生成失败，回退到本地占位图: %s", exc)
+            return LocalPlaceholderProvider().generate_texture(prompt, out_path, width, height, seed)
+
+
 def get_provider(provider: str) -> ImageProvider:
     normalized = provider.lower().strip()
     if normalized == "openai":
         return OpenAIImageProvider()
     if normalized == "replicate":
         return ReplicateProvider()
+    if normalized == "neodomain":
+        return NeodomainProvider()
     return LocalPlaceholderProvider()
 
 
