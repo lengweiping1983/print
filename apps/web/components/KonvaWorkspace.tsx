@@ -25,6 +25,13 @@ const maskWorkerRequests = new Map<
   }
 >();
 
+type TextureSnapSettings = {
+  originX: number;
+  originY: number;
+  periodX: number;
+  periodY: number;
+};
+
 function useLoadedImage(src: string, fallbackSrc = "") {
   const cacheKey = imageCacheKey(src, fallbackSrc);
   const [image, setImage] = useState<HTMLImageElement | null>(() => loadedImageValueCache.get(cacheKey) ?? null);
@@ -349,6 +356,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
     return createOutlineCanvas(alphaMaskImage, outlineWidth, "#e05252");
   }, [alphaMaskImage, outlineWidth]);
   const [pieceZoom, setPieceZoom] = useState(1);
+  const [dragSnapEnabled, setDragSnapEnabled] = useState(true);
   const [stageWrapRef, stageWrapSize] = useElementSize<HTMLDivElement>();
   const stageWidth = Math.max(320, Math.round(stageWrapSize.width || 520));
   const stageHeight = Math.max(440, Math.min(640, Math.round(stageWidth * 1.22)));
@@ -363,6 +371,8 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
   }, [selected, stageHeight, stageWidth]);
   const [activeToolbarPopover, setActiveToolbarPopover] = useState("");
   const [dragPreviewOffset, setDragPreviewOffset] = useState<{ pieceId: string; x: number; y: number } | null>(null);
+  const snapSettings = useMemo(() => textureSnapSettings(designCanvas ?? null), [designCanvas]);
+  const activeSnapSettings = dragSnapEnabled ? snapSettings : null;
   const displayPiece = useMemo(() => {
     if (!selected || dragPreviewOffset?.pieceId !== selected.id) return selected;
     return {
@@ -401,6 +411,19 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
               ))}
             </select>
           )}
+          <label className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ring-1 ring-line ${snapSettings ? "cursor-pointer bg-white text-ink" : "cursor-not-allowed bg-slate-100 text-slate-400"}`}>
+            <input
+              type="checkbox"
+              className="peer sr-only"
+              checked={dragSnapEnabled && Boolean(snapSettings)}
+              onChange={(event) => setDragSnapEnabled(event.target.checked)}
+              disabled={!snapSettings}
+            />
+            <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-action">
+              <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
+            </span>
+            拖动吸附
+          </label>
           <ZoomButton label="-" onClick={() => setPieceZoom((zoom) => clampZoom(zoom - 0.1))} />
           <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(pieceZoom * 100)}%</span>
           <ZoomButton label="+" onClick={() => setPieceZoom((zoom) => clampZoom(zoom + 0.1))} />
@@ -432,6 +455,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
               zoom={pieceZoom}
               draggable={!displayPiece.mirror_of}
               opacity={displayPiece.mirror_of ? 0.45 : 1}
+              snapSettings={activeSnapSettings}
               onPreviewMove={(x, y) => setDragPreviewOffset({ pieceId: displayPiece.id, x, y })}
               onMove={(x, y) => {
                 setDragPreviewOffset(null);
@@ -617,6 +641,7 @@ export function LayoutPreview({
   const [layoutZoom, setLayoutZoom] = useState(0.25);
   const [designZoom, setDesignZoom] = useState(0.25);
   const [previewMode, setPreviewMode] = useState<"layout" | "design">("layout");
+  const [dragSnapEnabled, setDragSnapEnabled] = useState(true);
   const [previewWrapRef, previewWrapSize] = useElementSize<HTMLDivElement>();
   const layoutBounds = useMemo(() => {
     const width = Math.max(1200, ...pieces.map((piece) => piece.source_x + piece.width + 80), 1200);
@@ -643,6 +668,8 @@ export function LayoutPreview({
     return Math.max(0.05, Number(next.toFixed(2)));
   }, [designBounds, previewWrapSize.width]);
   const currentZoom = previewMode === "design" ? designZoom : layoutZoom;
+  const snapSettings = useMemo(() => textureSnapSettings(designCanvas ?? null), [designCanvas]);
+  const activeSnapSettings = dragSnapEnabled ? snapSettings : null;
   const updateCurrentZoom = (updater: (zoom: number) => number) => {
     if (previewMode === "design") {
       setDesignZoom(updater);
@@ -673,6 +700,21 @@ export function LayoutPreview({
           <span className="rounded-md bg-mist px-2 py-1.5 text-sm text-slate-600">{pieces.length} 个裁片</span>
           <ZoomButton label="排版" active={previewMode === "layout"} onClick={() => setPreviewMode("layout")} />
           <ZoomButton label="设计画布" active={previewMode === "design"} onClick={() => setPreviewMode("design")} />
+          {previewMode === "design" && (
+            <label className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ring-1 ring-line ${snapSettings ? "cursor-pointer bg-white text-ink" : "cursor-not-allowed bg-slate-100 text-slate-400"}`}>
+              <input
+                type="checkbox"
+                className="peer sr-only"
+                checked={dragSnapEnabled && Boolean(snapSettings)}
+                onChange={(event) => setDragSnapEnabled(event.target.checked)}
+                disabled={!snapSettings}
+              />
+              <span className="relative inline-flex h-5 w-9 items-center rounded-full bg-slate-200 transition peer-checked:bg-action">
+                <span className="inline-block h-3.5 w-3.5 translate-x-1 rounded-full bg-white transition peer-checked:translate-x-5" />
+              </span>
+              拖动吸附
+            </label>
+          )}
           <ZoomButton label="-" onClick={() => updateCurrentZoom((zoom) => clampZoom(zoom - 0.05))} />
           <span className="min-w-14 rounded-md bg-mist px-2 py-1.5 text-center text-sm text-slate-600">{Math.round(currentZoom * 100)}%</span>
           <ZoomButton label="+" onClick={() => updateCurrentZoom((zoom) => clampZoom(zoom + 0.05))} />
@@ -734,6 +776,7 @@ export function LayoutPreview({
                     selected={piece.id === selectedPieceId}
                     outlineWidth={outlineWidth}
                     zoom={designZoom}
+                    snapSettings={activeSnapSettings}
                     onSelect={() => onSelectPiece(piece.id)}
                     onChange={(update) => onMoveDesignRegion(piece, update)}
                   />
@@ -831,6 +874,7 @@ function DesignRegionOutline({
   selected,
   outlineWidth,
   zoom,
+  snapSettings,
   onSelect,
   onChange
 }: {
@@ -838,6 +882,7 @@ function DesignRegionOutline({
   selected: boolean;
   outlineWidth: number;
   zoom: number;
+  snapSettings?: TextureSnapSettings | null;
   onSelect: () => void;
   onChange: (update: Partial<Piece["transform"]>) => void;
 }) {
@@ -864,9 +909,32 @@ function DesignRegionOutline({
         draggable={selected && !locked && !isLinked}
         onClick={onSelect}
         onTap={onSelect}
+        onDragMove={(event) => {
+          if (!snapSettings) return;
+          const snapped = snapDesignRegionPosition({
+            sampleX: event.target.x(),
+            sampleY: event.target.y(),
+            offsetX,
+            offsetY,
+            ...snapSettings,
+          });
+          event.target.x(snapped.sampleX);
+          event.target.y(snapped.sampleY);
+        }}
         onDragEnd={(event) => {
           event.cancelBubble = true;
-          onChange({ design_x: Math.round(event.target.x() - offsetX), design_y: Math.round(event.target.y() - offsetY) });
+          const snapped = snapSettings
+            ? snapDesignRegionPosition({
+                sampleX: event.target.x(),
+                sampleY: event.target.y(),
+                offsetX,
+                offsetY,
+                ...snapSettings,
+              })
+            : { sampleX: event.target.x(), sampleY: event.target.y() };
+          event.target.x(snapped.sampleX);
+          event.target.y(snapped.sampleY);
+          onChange({ design_x: Math.round(snapped.sampleX - offsetX), design_y: Math.round(snapped.sampleY - offsetY) });
         }}
       />
       <Text
@@ -1196,25 +1264,19 @@ function ToolbarSnapButton({
   onPatchTransform: (transform: Partial<Piece["transform"]>) => void;
 }) {
   const popover = useToolbarPopover({ popoverId, activePopover, setActivePopover }, Boolean(disabled));
-  const repeat = designCanvas?.texture_repeat;
-  const hasRepeat = repeat?.has_repeat && (repeat.period_x > 0 || repeat.period_y > 0);
-  const scale = designCanvas?.texture_scale ?? 1;
-  const periodX = repeat?.period_x ? repeat.period_x * scale : 0;
-  const periodY = repeat?.period_y ? repeat.period_y * scale : 0;
-  const offsetX = Number(designCanvas?.texture_offset_x || 0);
-  const offsetY = Number(designCanvas?.texture_offset_y || 0);
+  const snapSettings = textureSnapSettings(designCanvas);
+  const hasRepeat = Boolean(snapSettings);
+  const periodX = snapSettings?.periodX ?? 0;
+  const periodY = snapSettings?.periodY ?? 0;
 
   const handleSnap = () => {
-    if (!hasRepeat || !repeat) return;
+    if (!snapSettings) return;
     const snapped = snapPieceSamplingOffset({
       designX: piece.transform.design_x ?? 0,
       designY: piece.transform.design_y ?? 0,
       offsetX: piece.transform.offset_x ?? 0,
       offsetY: piece.transform.offset_y ?? 0,
-      originX: offsetX,
-      originY: offsetY,
-      periodX,
-      periodY,
+      ...snapSettings,
     });
     if (snapped.changed) {
       onPatchTransform({ offset_x: snapped.offsetX, offset_y: snapped.offsetY });
@@ -1282,6 +1344,55 @@ export function snapPieceSamplingOffset({
     offsetX: nextOffsetX,
     offsetY: nextOffsetY,
     changed: Math.abs(nextOffsetX - offsetX) > 0.5 || Math.abs(nextOffsetY - offsetY) > 0.5,
+  };
+}
+
+function snapDesignRegionPosition({
+  sampleX,
+  sampleY,
+  offsetX,
+  offsetY,
+  originX,
+  originY,
+  periodX,
+  periodY,
+}: {
+  sampleX: number;
+  sampleY: number;
+  offsetX: number;
+  offsetY: number;
+  originX: number;
+  originY: number;
+  periodX: number;
+  periodY: number;
+}): { sampleX: number; sampleY: number; designX: number; designY: number } {
+  const designX = sampleX - offsetX;
+  const designY = sampleY - offsetY;
+  const snapped = snapPieceSamplingOffset({ designX, designY, offsetX, offsetY, originX, originY, periodX, periodY });
+  const nextSampleX = designX + snapped.offsetX;
+  const nextSampleY = designY + snapped.offsetY;
+  return {
+    sampleX: nextSampleX,
+    sampleY: nextSampleY,
+    designX: nextSampleX - offsetX,
+    designY: nextSampleY - offsetY,
+  };
+}
+
+function textureSnapSettings(designCanvas: DesignCanvas | null): TextureSnapSettings | null {
+  const repeat = designCanvas?.texture_repeat;
+  if (!repeat?.has_repeat || (!repeat.period_x && !repeat.period_y)) return null;
+  const angle = Number(designCanvas?.global_texture_angle || 0) % 180;
+  if (Math.min(Math.abs(angle), Math.abs(180 - angle)) > 0.01) return null;
+  const scale = Math.max(0.05, Number(designCanvas?.texture_scale || 1));
+  const periodX = repeat.period_x > 0 ? repeat.period_x * scale : 0;
+  const periodY = repeat.period_y > 0 ? repeat.period_y * scale : 0;
+  if (periodX < 4 && periodY < 4) return null;
+  return {
+    originX: Number(designCanvas?.texture_offset_x || 0),
+    originY: Number(designCanvas?.texture_offset_y || 0),
+    periodX: periodX >= 4 ? periodX : 0,
+    periodY: periodY >= 4 ? periodY : 0,
   };
 }
 
@@ -1474,6 +1585,7 @@ function ClippedTextureLayer({
   zoom = 1,
   draggable = false,
   opacity = 1,
+  snapSettings,
   onPreviewMove,
   onMove,
   onMoveCancel,
@@ -1489,6 +1601,7 @@ function ClippedTextureLayer({
   zoom?: number;
   draggable?: boolean;
   opacity?: number;
+  snapSettings?: TextureSnapSettings | null;
   onPreviewMove?: (x: number, y: number) => void;
   onMove?: (x: number, y: number) => void;
   onMoveCancel?: () => void;
@@ -1530,15 +1643,37 @@ function ClippedTextureLayer({
     if (globalMode) {
       const deltaX = Math.round((x - (frame.x + frame.width / 2)) / frameScale);
       const deltaY = Math.round((y - (frame.y + frame.height / 2)) / frameScale);
-      return {
+      const next = {
         x: renderPiece.transform.offset_x - deltaX,
         y: renderPiece.transform.offset_y - deltaY
       };
+      if (snapSettings) {
+        const snapped = snapPieceSamplingOffset({
+            designX: renderPiece.transform.design_x ?? 0,
+            designY: renderPiece.transform.design_y ?? 0,
+            offsetX: next.x,
+            offsetY: next.y,
+            ...snapSettings,
+        });
+        return { x: snapped.offsetX, y: snapped.offsetY };
+      }
+      return next;
     }
-    return {
+    const next = {
       x: Math.round((x - (frame.x + frame.width / 2)) / frameScale),
       y: Math.round((y - (frame.y + frame.height / 2)) / frameScale)
     };
+    if (snapSettings) {
+      const snapped = snapPieceSamplingOffset({
+          designX: renderPiece.transform.design_x ?? 0,
+          designY: renderPiece.transform.design_y ?? 0,
+          offsetX: next.x,
+          offsetY: next.y,
+          ...snapSettings,
+      });
+      return { x: snapped.offsetX, y: snapped.offsetY };
+    }
+    return next;
   };
 
   return (
@@ -1564,6 +1699,9 @@ function ClippedTextureLayer({
           if (globalMode) {
             event.target.x(frame.x + frame.width / 2);
             event.target.y(frame.y + frame.height / 2);
+          } else if (snapSettings) {
+            event.target.x(frame.x + frame.width / 2 + next.x * frameScale);
+            event.target.y(frame.y + frame.height / 2 + next.y * frameScale);
           }
           onPreviewMove(next.x, next.y);
         }}
@@ -1573,6 +1711,9 @@ function ClippedTextureLayer({
           if (globalMode) {
             event.target.x(frame.x + frame.width / 2);
             event.target.y(frame.y + frame.height / 2);
+          } else if (snapSettings) {
+            event.target.x(frame.x + frame.width / 2 + next.x * frameScale);
+            event.target.y(frame.y + frame.height / 2 + next.y * frameScale);
           }
           onMove(next.x, next.y);
         }}

@@ -119,7 +119,7 @@ def test_template_set_full_workflow() -> None:
         for pp in project_pieces:
             assert "transform" in pp
             # role should carry from piece-def
-            assert pp["transform"]["piece_role"] in ("front_center", "unknown")
+            assert pp["transform"]["piece_role"] in ("front_center", "front_right", "unknown")
 
         for pp, stp in zip(project_pieces, m_pieces_endpoint):
             assert pp["width"] == stp["width"]

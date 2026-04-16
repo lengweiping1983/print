@@ -43,6 +43,13 @@ class PieceBox:
         return self.source_x + self.width / 2
 
 
+@dataclass
+class LanePlacement:
+    x: float
+    y: float
+    clipped: bool = False
+
+
 def build_design_canvas_config(
     pieces: list[dict[str, Any]],
     payload: dict[str, Any] | None = None,
@@ -104,6 +111,7 @@ def auto_map_pieces(
     lanes = _role_lanes(design_canvas)
     snap = _texture_snap_settings(design_canvas)
     lane_offsets: dict[str, int] = {}
+    role_counts = {role: sum(1 for value in roles.values() if value == role) for role in set(roles.values())}
     mapped: list[dict[str, Any]] = []
     for piece in pieces:
         box = _box(piece)
@@ -111,7 +119,8 @@ def auto_map_pieces(
         lane = lanes.get(role, lanes["unknown"])
         local_index = lane_offsets.get(role, 0)
         lane_offsets[role] = local_index + 1
-        design_x, design_y = _place_in_lane(box, lane, local_index)
+        placement = _place_in_lane(box, lane, local_index, design_canvas, role_counts.get(role, 1))
+        design_x, design_y = placement.x, placement.y
         snapped = False
         if snap:
             design_x, design_y, snapped = _snap_to_texture_period(box, lane, design_x, design_y, snap)
@@ -120,6 +129,8 @@ def auto_map_pieces(
         rotation, orientation_note = _orientation_rotation(box, role)
         if snapped:
             note = f"{note} 已按纹理周期吸附取样坐标。"
+        if placement.clipped:
+            note = f"{note} 裁片尺寸接近或超出自动车道，已夹在画布范围内，建议人工确认。"
         if orientation_note:
             note = f"{note} {orientation_note}"
         mapped.append(
@@ -145,6 +156,7 @@ def auto_map_pieces(
                 "fit_note": note,
             }
         )
+    _filter_seam_links(mapped)
     if snap:
         _apply_seam_alignment(mapped, snap)
     return mapped
@@ -202,10 +214,18 @@ def _assign_roles(boxes: list[PieceBox]) -> dict[str, str]:
     body_candidates = [box for box in ordered if box.id not in roles]
     if len(body_candidates) == 1:
         roles[body_candidates[0].id] = "main"
+    elif len(body_candidates) == 2:
+        pair = _pair_score(body_candidates[0], body_candidates[1])
+        left, right = _left_right(body_candidates[0], body_candidates[1])
+        if pair["score"] <= 0.08 and pair["height_delta"] <= 0.08 and pair["area_delta"] <= 0.12:
+            roles[left.id] = "front_left"
+            roles[right.id] = "front_right"
+        else:
+            roles[body_candidates[0].id] = "main"
     elif body_candidates:
         roles[body_candidates[0].id] = "back"
     pairs = _find_similar_pairs([box for box in body_candidates[1:] if box.id not in roles])
-    if pairs:
+    if pairs and _pair_score(pairs[0][0], pairs[0][1])["score"] <= 0.05:
         left, right = _left_right(pairs[0][0], pairs[0][1])
         roles[left.id] = "front_left"
         roles[right.id] = "front_right"
@@ -222,12 +242,10 @@ def _find_similar_pairs(boxes: list[PieceBox]) -> list[tuple[PieceBox, PieceBox]
     candidates: list[tuple[float, PieceBox, PieceBox]] = []
     for i, left in enumerate(boxes):
         for right in boxes[i + 1 :]:
-            area_delta = abs(left.area - right.area) / max(left.area, right.area, 1)
-            width_delta = abs(left.width - right.width) / max(left.width, right.width, 1)
-            height_delta = abs(left.height - right.height) / max(left.height, right.height, 1)
-            score = area_delta * 0.5 + width_delta * 0.25 + height_delta * 0.25
-            if score <= 0.28:
-                candidates.append((score, left, right))
+            pair = _pair_score(left, right)
+            # 镜像主片应非常接近；袖片等近似配对允许稍宽松但仍避免明显错配。
+            if pair["score"] <= 0.15 and pair["area_delta"] <= 0.21:
+                candidates.append((pair["score"], left, right))
     pairs: list[tuple[PieceBox, PieceBox]] = []
     used: set[str] = set()
     for _, left, right in sorted(candidates, key=lambda item: item[0]):
@@ -237,6 +255,14 @@ def _find_similar_pairs(boxes: list[PieceBox]) -> list[tuple[PieceBox, PieceBox]
         used.add(left.id)
         used.add(right.id)
     return pairs
+
+
+def _pair_score(left: PieceBox, right: PieceBox) -> dict[str, float]:
+    area_delta = abs(left.area - right.area) / max(left.area, right.area, 1)
+    width_delta = abs(left.width - right.width) / max(left.width, right.width, 1)
+    height_delta = abs(left.height - right.height) / max(left.height, right.height, 1)
+    score = area_delta * 0.5 + width_delta * 0.25 + height_delta * 0.25
+    return {"score": score, "area_delta": area_delta, "width_delta": width_delta, "height_delta": height_delta}
 
 
 def _left_right(a: PieceBox, b: PieceBox) -> tuple[PieceBox, PieceBox]:
@@ -261,11 +287,32 @@ def _role_lanes(canvas: dict[str, Any]) -> dict[str, tuple[float, float, float, 
     }
 
 
-def _place_in_lane(box: PieceBox, lane: tuple[float, float, float, float], index: int) -> tuple[float, float]:
+def _place_in_lane(
+    box: PieceBox,
+    lane: tuple[float, float, float, float],
+    index: int,
+    canvas: dict[str, Any],
+    role_count: int = 1,
+) -> LanePlacement:
     x, y, lane_w, lane_h = lane
-    step = max(24, min(box.width, lane_w / 4))
-    row_step = max(24, min(box.height, lane_h / 3))
-    return x + (index % 3) * step, y + int(index // 3) * row_step
+    margin = float(canvas.get("margin", 96))
+    canvas_w = float(canvas["width"])
+    canvas_h = float(canvas["height"])
+    lane_w = max(lane_w, min(canvas_w - margin - x, box.width + margin))
+    lane_h = max(lane_h, min(canvas_h - margin - y, box.height + margin))
+    columns = max(1, min(3, int(lane_w // max(1, box.width + 24))))
+    if role_count <= 2 and lane_w >= (box.width * 2 + 24):
+        columns = min(2, columns)
+    step = max(box.width + 24, lane_w / max(1, columns))
+    row_step = max(box.height + 24, min(max(box.height + 24, lane_h / 3), box.height * 1.5 + 24))
+    raw_x = x + (index % columns) * step
+    raw_y = y + int(index // columns) * row_step
+    max_x = max(margin, canvas_w - margin - box.width)
+    max_y = max(margin, canvas_h - margin - box.height)
+    next_x = min(max(raw_x, margin), max_x)
+    next_y = min(max(raw_y, margin), max_y)
+    clipped = abs(next_x - raw_x) > 0.01 or abs(next_y - raw_y) > 0.01 or box.width > lane_w or box.height > lane_h
+    return LanePlacement(next_x, next_y, clipped)
 
 
 def _texture_snap_settings(canvas: dict[str, Any]) -> tuple[float, float] | None:
@@ -387,13 +434,29 @@ def _fit_note(role: str, confidence: float, garment_type: str) -> str:
 
 def _default_seam_links(role: str) -> list[dict[str, str]]:
     links = {
-        "front_left": [{"edge": "shoulder", "to_role": "back", "to_edge": "shoulder"}, {"edge": "side", "to_role": "back", "to_edge": "side"}],
-        "front_right": [{"edge": "shoulder", "to_role": "back", "to_edge": "shoulder"}, {"edge": "side", "to_role": "back", "to_edge": "side"}],
-        "sleeve_left": [{"edge": "sleeve_cap", "to_role": "front_left", "to_edge": "armhole"}],
-        "sleeve_right": [{"edge": "sleeve_cap", "to_role": "front_right", "to_edge": "armhole"}],
-        "collar": [{"edge": "neckline", "to_role": "front_left", "to_edge": "neckline"}],
+        "front_left": [
+            {"edge": "shoulder", "from_position": "top", "to_role": "back", "to_edge": "shoulder", "to_position": "top"},
+            {"edge": "side", "from_position": "right", "to_role": "back", "to_edge": "side", "to_position": "left"},
+        ],
+        "front_right": [
+            {"edge": "shoulder", "from_position": "top", "to_role": "back", "to_edge": "shoulder", "to_position": "top"},
+            {"edge": "side", "from_position": "left", "to_role": "back", "to_edge": "side", "to_position": "right"},
+        ],
+        "sleeve_left": [{"edge": "sleeve_cap", "from_position": "top", "to_role": "front_left", "to_edge": "armhole", "to_position": "left"}],
+        "sleeve_right": [{"edge": "sleeve_cap", "from_position": "top", "to_role": "front_right", "to_edge": "armhole", "to_position": "right"}],
+        "collar": [{"edge": "neckline", "from_position": "bottom", "to_role": "front_left", "to_edge": "neckline", "to_position": "top"}],
     }
     return links.get(role, [])
+
+
+def _filter_seam_links(mapped: list[dict[str, Any]]) -> None:
+    roles = {entry.get("piece_role") for entry in mapped}
+    for entry in mapped:
+        entry["seam_links"] = [
+            link
+            for link in entry.get("seam_links", [])
+            if link.get("to_role") in roles
+        ]
 
 
 def _default_safe_zones(box: PieceBox) -> list[dict[str, float]]:
@@ -416,16 +479,13 @@ def _default_avoid_zones(box: PieceBox) -> list[dict[str, float]]:
 # 缝线对齐约束
 # ---------------------------------------------------------------------------
 
-# 每条边在裁片坐标系中对应的"代表坐标"：
-#   水平缝合边（shoulder / neckline）→ 对齐 design_x（水平相位）
-#   垂直缝合边（side / armhole / sleeve_cap）→ 对齐 design_y（垂直相位）
-_EDGE_AXIS: dict[str, str] = {
-    "shoulder": "x",
-    "neckline": "x",
-    "hem": "x",
-    "side": "y",
-    "armhole": "y",
-    "sleeve_cap": "y",
+_EDGE_AXES: dict[str, tuple[str, ...]] = {
+    "shoulder": ("x",),
+    "neckline": ("x",),
+    "hem": ("x",),
+    "side": ("x", "y"),
+    "armhole": ("x", "y"),
+    "sleeve_cap": ("x", "y"),
 }
 
 # 调整优先级：越靠后越容易被调整（保持主片不动，调整附属片）
@@ -438,6 +498,7 @@ _ROLE_ADJUST_PRIORITY: dict[str, int] = {
     "collar": 3,
     "placket": 3,
     "strip": 3,
+    "main": 0,
     "unknown": 4,
 }
 
@@ -475,14 +536,7 @@ def _apply_seam_alignment(mapped: list[dict[str, Any]], snap: tuple[float, float
         if role not in by_role:
             by_role[role] = entry
 
-    original_phase = {
-        (entry["id"], "x"): _seam_phase(entry, "x")
-        for entry in mapped
-    }
-    original_phase.update({
-        (entry["id"], "y"): _seam_phase(entry, "y")
-        for entry in mapped
-    })
+    original_phase = {(entry["id"], axis): _seam_phase(entry, axis) for entry in mapped for axis in ("x", "y")}
 
     for entry_a in mapped:
         role_a = entry_a["piece_role"]
@@ -490,49 +544,59 @@ def _apply_seam_alignment(mapped: list[dict[str, Any]], snap: tuple[float, float
             edge_a = link.get("edge", "")
             role_b = link.get("to_role", "")
             edge_b = link.get("to_edge", "")
-            axis = _EDGE_AXIS.get(edge_a) or _EDGE_AXIS.get(edge_b)
-            if not axis:
+            axes = _EDGE_AXES.get(edge_a) or _EDGE_AXES.get(edge_b) or ()
+            if not axes:
                 continue
             entry_b = by_role.get(role_b)
             if entry_b is None:
                 continue
 
-            period = period_x if axis == "x" else period_y
-            if period <= 0:
-                continue
+            for axis in axes:
+                period = period_x if axis == "x" else period_y
+                if period <= 0:
+                    continue
 
-            phase_a = _seam_phase(entry_a, axis)
-            phase_b = _seam_phase(entry_b, axis)
-            delta = phase_a - phase_b
-            # 取最近整数倍 → 最小修正量
-            correction = _nearest_period_correction(delta, period)
-            if abs(correction) < 0.5:
-                continue  # 已经对齐，无需调整
+                phase_a = _seam_phase(entry_a, axis, link.get("from_position"))
+                phase_b = _seam_phase(entry_b, axis, link.get("to_position"))
+                delta = phase_a - phase_b
+                correction = _nearest_period_correction(delta, period)
+                if abs(correction) < 0.5:
+                    continue
 
-            # 决定调整哪一侧（优先调高优先级数值的那侧）
-            pri_a = _ROLE_ADJUST_PRIORITY.get(role_a, 4)
-            pri_b = _ROLE_ADJUST_PRIORITY.get(role_b, 4)
-            if pri_a > pri_b:
-                # 调整 A，使 phase_a 向 phase_b 靠拢
-                applied = _shift_entry(entry_a, axis, -correction, period, original_phase[(entry_a["id"], axis)])
-                _append_seam_note(entry_a, role_b, edge_a, axis, applied)
-            elif pri_b > pri_a:
-                # 调整 B，使 phase_b 向 phase_a 靠拢
-                applied = _shift_entry(entry_b, axis, correction, period, original_phase[(entry_b["id"], axis)])
-                _append_seam_note(entry_b, role_a, edge_b, axis, applied)
-            else:
-                # 同优先级：各向中间靠拢半步，保持相对位置对称
-                half = correction / 2
-                applied_a = _shift_entry(entry_a, axis, -half, period, original_phase[(entry_a["id"], axis)])
-                applied_b = _shift_entry(entry_b, axis, half, period, original_phase[(entry_b["id"], axis)])
-                _append_seam_note(entry_a, role_b, edge_a, axis, applied_a)
-                _append_seam_note(entry_b, role_a, edge_b, axis, applied_b)
+                pri_a = _ROLE_ADJUST_PRIORITY.get(role_a, 4)
+                pri_b = _ROLE_ADJUST_PRIORITY.get(role_b, 4)
+                if pri_a > pri_b:
+                    applied = _shift_entry(entry_a, axis, -correction, period, original_phase[(entry_a["id"], axis)])
+                    _append_seam_note(entry_a, role_b, edge_a, axis, applied)
+                elif pri_b > pri_a:
+                    applied = _shift_entry(entry_b, axis, correction, period, original_phase[(entry_b["id"], axis)])
+                    _append_seam_note(entry_b, role_a, edge_b, axis, applied)
+                else:
+                    half = correction / 2
+                    applied_a = _shift_entry(entry_a, axis, -half, period, original_phase[(entry_a["id"], axis)])
+                    applied_b = _shift_entry(entry_b, axis, half, period, original_phase[(entry_b["id"], axis)])
+                    _append_seam_note(entry_a, role_b, edge_a, axis, applied_a)
+                    _append_seam_note(entry_b, role_a, edge_b, axis, applied_b)
 
 
-def _seam_phase(entry: dict[str, Any], axis: str) -> float:
-    """返回裁片在指定轴上的取样起始坐标（即纹理相位代表值）。"""
+def _seam_phase(entry: dict[str, Any], axis: str, position: str | None = None) -> float:
+    """返回裁片指定边在纹理轴上的代表坐标；缺少边位置时回退到起始坐标。"""
     region = entry["design_region"]
-    return float(region["x"] if axis == "x" else region["y"])
+    x = float(region["x"])
+    y = float(region["y"])
+    width = float(region.get("width", 0) or 0)
+    height = float(region.get("height", 0) or 0)
+    if axis == "x":
+        if position == "right":
+            return x + width
+        if position in {"center", "middle"}:
+            return x + width / 2
+        return x
+    if position == "bottom":
+        return y + height
+    if position in {"center", "middle"}:
+        return y + height / 2
+    return y
 
 
 def _nearest_period_correction(delta: float, period: float) -> float:

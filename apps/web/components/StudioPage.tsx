@@ -199,6 +199,7 @@ export function StudioPage() {
   const fabricInputRef = useRef<HTMLInputElement | null>(null);
   const garmentInputRef = useRef<HTMLInputElement | null>(null);
   const aiTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const layerImageInputRef = useRef<HTMLInputElement | null>(null);
 
   const [fabricPrompts, setFabricPrompts] = useState<FabricPrompt[]>([]);
   const [showPromptMenu, setShowPromptMenu] = useState(false);
@@ -207,6 +208,7 @@ export function StudioPage() {
   const [aiRatio, setAiRatio] = useState<"1:1" | "9:16" | "16:9" | "3:4" | "4:3">("1:1");
   const [showParamMenu, setShowParamMenu] = useState(false);
   const paramMenuRef = useRef<HTMLDivElement | null>(null);
+  const [aiDialogMode, setAiDialogMode] = useState<"texture" | "layer">("texture");
 
   useEffect(() => {
     let active = true;
@@ -475,6 +477,54 @@ export function StudioPage() {
     await saveDesignCanvas(next, true, previousSelectedLayerId);
   }
 
+  async function handleLayerUpload(file: File) {
+    if (!project || !designCanvas) {
+      setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
+      return;
+    }
+    setNotice(`上传 ${file.name}...`);
+    const asset = await api.uploadAsset(project.id, "pattern", file);
+    setAssets((current) => [asset, ...current]);
+    const layer = createLayer("image", designCanvas, asset);
+    const next = { ...designCanvas, layers: [...designLayers, layer] };
+    const previousSelectedLayerId = selectedLayerId;
+    setSelectedLayerId(layer.id);
+    await saveDesignCanvas(next, true, previousSelectedLayerId);
+    setNotice(`${file.name} 已添加为图片层。`);
+  }
+
+  async function handleLayerAiImage() {
+    if (!project || !designCanvas) {
+      setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
+      return;
+    }
+    try {
+      setNotice("正在生成 AI 图片层...");
+      const created = await api.generateTexture(project.id, "", "ai", prompt);
+      const done = await waitForJob(created.job_id, setJob);
+      const texture = done.output.texture as Texture;
+      setTextures((current) => [texture, ...current]);
+      const layer = createLayer("image", designCanvas);
+      const width = Math.min(520, Math.max(180, texture.width || 360));
+      const height = Math.min(520, Math.max(180, texture.height || 360));
+      const anchor = designCanvas.design_anchors?.[designCanvas.anchor] || { x: designCanvas.width / 2, y: designCanvas.height / 2 };
+      layer.name = "AI 图片层";
+      layer.source_url = texture.source_url;
+      layer.width = width;
+      layer.height = height;
+      layer.x = Math.round(anchor.x - width / 2);
+      layer.y = Math.round(anchor.y - height / 2);
+      const next = { ...designCanvas, layers: [...designLayers, layer] };
+      const previousSelectedLayerId = selectedLayerId;
+      setSelectedLayerId(layer.id);
+      await saveDesignCanvas(next, true, previousSelectedLayerId);
+      setShowAiTextureDialog(false);
+      setNotice("AI 图片层已生成。");
+    } catch (error) {
+      setNotice(readError(error));
+    }
+  }
+
   async function addTextLayer() {
     if (!canUseLayers || !designCanvas) {
       setNotice("请先上传或生成纹理，并点击“自动适配纹理”生成全局设计画布后，再添加图层。");
@@ -684,7 +734,7 @@ export function StudioPage() {
                 <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
                   上传衣服
                 </button>
-                <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => setShowAiTextureDialog(true)}>
+                <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => { setAiDialogMode("texture"); setShowAiTextureDialog(true); }}>
                   AI 生图
                 </button>
               </div>
@@ -819,16 +869,34 @@ export function StudioPage() {
             </div>
           </Panel>
 
-          <Panel title="图层">
-            <div className="grid gap-3 text-sm">
-              <div className="grid grid-cols-2 gap-2">
-                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addImageLayer}>
-                  添加图片层
+          <Panel
+            title="图层"
+            action={
+              <div className="flex gap-2">
+                <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => layerImageInputRef.current?.click()}>
+                  上传图片
                 </button>
-                <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
-                  添加文字层
+                <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => { setAiDialogMode("layer"); setShowAiTextureDialog(true); }}>
+                  AI 生图
                 </button>
               </div>
+            }
+          >
+            <div className="grid gap-3 text-sm">
+              <input
+                ref={layerImageInputRef}
+                className="hidden"
+                type="file"
+                accept="image/*"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleLayerUpload(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <button className="rounded-lg bg-white px-3 py-2 font-semibold ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
+                添加文字层
+              </button>
               {designLayers.length === 0 && (
                 <p className="m-0 text-xs leading-5 text-slate-500">
                   先完成“自动适配纹理”，生成全局设计画布后，可添加 logo、主图或号码文字。
@@ -841,8 +909,20 @@ export function StudioPage() {
                     className={`rounded-lg border px-3 py-2 text-left ${layer.id === selectedLayerId ? "border-jade bg-emerald-50" : "border-line bg-white"}`}
                     onClick={() => setSelectedLayerId(layer.id)}
                   >
-                    <span className="block font-semibold">{layer.name}</span>
-                    <span className="text-xs text-slate-500">{layer.type === "image" ? "图片层" : "文字层"} · {layer.visible ? "显示" : "隐藏"} · {layer.locked ? "锁定" : "可编辑"}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="block truncate font-semibold">{layer.name}</span>
+                        <span className="text-xs text-slate-500">{layer.type === "image" ? "图片层" : "文字层"} · {layer.visible ? "显示" : "隐藏"} · {layer.locked ? "锁定" : "可编辑"}</span>
+                      </div>
+                      {layer.type === "image" && layer.source_url && (
+                        <div className="group relative shrink-0">
+                          <img className="h-10 w-10 rounded-md object-cover" src={layer.source_url} alt="" />
+                          <div className="pointer-events-none absolute bottom-full right-0 z-50 mb-1 hidden rounded-lg border border-line bg-white p-1 shadow-lg group-hover:block">
+                            <img className="max-h-40 max-w-40 rounded-md object-contain" src={layer.source_url} alt="" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </button>
                 ))}
               </div>
@@ -970,7 +1050,11 @@ export function StudioPage() {
             className="relative w-full max-w-2xl rounded-lg border border-line bg-white p-4 text-ink shadow-panel"
             onSubmit={(event) => {
               event.preventDefault();
-              void handleTexture("ai");
+              if (aiDialogMode === "texture") {
+                void handleTexture("ai");
+              } else {
+                void handleLayerAiImage();
+              }
             }}
           >
             <div className="mb-4 flex items-center justify-between">
