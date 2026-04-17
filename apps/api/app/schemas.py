@@ -38,6 +38,7 @@ class AssetOut(BaseModel):
     filename: str
     path: str
     url: str
+    thumb_url: str
     width: int
     height: int
     sha256: str
@@ -149,10 +150,13 @@ class TextureOut(BaseModel):
     source_type: str
     source_path: str
     source_url: str
+    source_thumb_url: str
     seamless_path: str
     seamless_url: str
+    seamless_thumb_url: str
     design_canvas_path: str
     design_canvas_url: str
+    design_canvas_thumb_url: str
     fit_source_recommendation: Literal["source", "seamless"]
     fit_source: Literal["source", "seamless"]
     seamless_mode: str

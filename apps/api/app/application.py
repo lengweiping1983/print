@@ -18,6 +18,7 @@ from .config import DEFAULT_DPI, MAX_UPLOAD_BYTES, PROJECTS_DIR, STORAGE_DIR
 from .db import connect, dumps, init_db, loads, now_iso, rel_path, row_to_dict, storage_path
 from .design_ops import build_design_texture_canvas, build_fit_preview, build_safety_report
 from .image_ops import (
+    create_thumbnail,
     extract_alpha_components,
     extract_alpha_components_from_image,
     has_transparent_alpha,
@@ -175,14 +176,20 @@ async def upload_asset(
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except Exception:
         width, height = 0, 0
+    thumb_dst = asset_dir / f"{asset_id}_thumb.png"
+    try:
+        create_thumbnail(dst, thumb_dst)
+        thumb_path = rel_path(thumb_dst)
+    except Exception:
+        thumb_path = ""
     created = now_iso()
     with connect() as con:
         con.execute(
             """
-            insert into assets(id, project_id, kind, filename, path, width, height, sha256, metadata, created_at)
-            values (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
+            insert into assets(id, project_id, kind, filename, path, thumb_path, width, height, sha256, metadata, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
             """,
-            (asset_id, project_id, kind, file.filename or dst.name, rel_path(dst), width, height, sha.hexdigest(), created),
+            (asset_id, project_id, kind, file.filename or dst.name, rel_path(dst), thumb_path, width, height, sha.hexdigest(), created),
         )
     return get_asset_dict(asset_id)
 
@@ -399,7 +406,7 @@ def delete_texture(project_id: str, texture_id: str) -> dict:
     texture = get_texture_row(texture_id, project_id)
     with connect() as con:
         con.execute("delete from textures where id = ? and project_id = ?", (texture_id, project_id))
-    for key in ("source_path", "seamless_path", "design_canvas_path"):
+    for key in ("source_path", "seamless_path", "design_canvas_path", "source_thumb_path", "seamless_thumb_path", "design_canvas_thumb_path"):
         path = texture.get(key)
         if path:
             storage_path(path).unlink(missing_ok=True)
@@ -1389,6 +1396,8 @@ def _generate_texture_job(job_id: str, payload: dict) -> dict:
     fit_source = analysis["recommendation"]
     seamless_path = ""
     seamless_mode = ""
+    source_thumb_path = ""
+    seamless_thumb_path = ""
     if fit_source == "seamless":
         seamless_out = textures_dir / f"{texture_id}_seamless.png"
         seamless_width = int(payload.get("tile_width") or 4096)
@@ -1398,22 +1407,37 @@ def _generate_texture_job(job_id: str, payload: dict) -> dict:
         seamless_path = rel_path(seamless_out)
         seamless_mode = "mirror"
         width, height = image_size(seamless_out)
+    try:
+        thumb_dst = textures_dir / f"{texture_id}_source_thumb.png"
+        create_thumbnail(storage_path(source_path), thumb_dst)
+        source_thumb_path = rel_path(thumb_dst)
+    except Exception:
+        pass
+    if seamless_path:
+        try:
+            seamless_thumb_dst = textures_dir / f"{texture_id}_seamless_thumb.png"
+            create_thumbnail(storage_path(seamless_path), seamless_thumb_dst)
+            seamless_thumb_path = rel_path(seamless_thumb_dst)
+        except Exception:
+            pass
     created = now_iso()
     with connect() as con:
         con.execute(
             """
             insert into textures(
-              id, project_id, source_type, source_path, seamless_path, fit_source_recommendation,
-              fit_source, seamless_mode, analysis, prompt, provider, model, seed, width, height, created_at
+              id, project_id, source_type, source_path, source_thumb_path, seamless_path, seamless_thumb_path,
+              fit_source_recommendation, fit_source, seamless_mode, analysis, prompt, provider, model, seed, width, height, created_at
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 texture_id,
                 project_id,
                 source_type,
                 source_path,
+                source_thumb_path,
                 seamless_path,
+                seamless_thumb_path,
                 analysis["recommendation"],
                 fit_source,
                 seamless_mode,
@@ -1443,14 +1467,21 @@ def _seamless_job(job_id: str, payload: dict) -> dict:
         make_offset_tile(source, out, width, height)
     else:
         make_mirror_tile(source, out, width, height)
+    seamless_thumb_path = ""
+    try:
+        seamless_thumb_dst = project_dir(project_id) / "textures" / f"{texture['id']}_seamless_thumb.png"
+        create_thumbnail(out, seamless_thumb_dst)
+        seamless_thumb_path = rel_path(seamless_thumb_dst)
+    except Exception:
+        pass
     with connect() as con:
         con.execute(
             """
             update textures
-            set seamless_path = ?, fit_source = 'seamless', seamless_mode = ?, width = ?, height = ?, version = version + 1
+            set seamless_path = ?, seamless_thumb_path = ?, fit_source = 'seamless', seamless_mode = ?, width = ?, height = ?, version = version + 1
             where id = ? and project_id = ?
             """,
-            (rel_path(out), payload.get("mode") or "mirror", width, height, texture["id"], project_id),
+            (rel_path(out), seamless_thumb_path, payload.get("mode") or "mirror", width, height, texture["id"], project_id),
         )
     return {"texture": _texture_out(get_texture_row(texture["id"], project_id))}
 
@@ -1492,6 +1523,13 @@ def _fit_global_job(job_id: str, payload: dict) -> dict:
     mappable_pieces = primary_pieces(pieces)
     mappings = auto_map_pieces(mappable_pieces, design_canvas, payload.get("garment_type", "unknown"))
     build_design_texture_canvas(texture_source_path, design_path, design_canvas, asset_paths(project_id))
+    design_canvas_thumb_path = ""
+    try:
+        design_canvas_thumb_dst = project_dir(project_id) / "textures" / f"{texture['id']}_design_canvas_thumb.png"
+        create_thumbnail(design_path, design_canvas_thumb_dst)
+        design_canvas_thumb_path = rel_path(design_canvas_thumb_dst)
+    except Exception:
+        pass
     if payload.get("apply", True):
         apply_piece_mappings(project_id, mappable_pieces, mappings)
         pieces = raw_pieces(project_id)
@@ -1501,10 +1539,10 @@ def _fit_global_job(job_id: str, payload: dict) -> dict:
             con.execute(
                 """
                 update textures
-                set design_canvas_path = ?, fit_source = ?, width = ?, height = ?, version = version + 1
+                set design_canvas_path = ?, design_canvas_thumb_path = ?, fit_source = ?, width = ?, height = ?, version = version + 1
                 where id = ? and project_id = ?
                 """,
-                (rel_path(design_path), texture_source, design_canvas["width"], design_canvas["height"], texture["id"], project_id),
+                (rel_path(design_path), design_canvas_thumb_path, texture_source, design_canvas["width"], design_canvas["height"], texture["id"], project_id),
             )
         texture = get_texture_row(texture["id"], project_id)
     preview = project_dir(project_id) / "exports" / f"{job_id}_global_fit_preview.png"
@@ -1536,15 +1574,23 @@ def _render_design_canvas_job(job_id: str, payload: dict) -> dict:
     texture_source_path, texture_source, _ = resolve_texture_source(texture, texture.get("fit_source"))
     build_design_texture_canvas(texture_source_path, design_path, design_canvas, asset_paths(project_id))
     update_project_design_canvas(project_id, design_canvas)
+    design_canvas_thumb_path = ""
+    try:
+        design_canvas_thumb_dst = project_dir(project_id) / "textures" / f"{texture['id']}_design_canvas_thumb.png"
+        create_thumbnail(design_path, design_canvas_thumb_dst)
+        design_canvas_thumb_path = rel_path(design_canvas_thumb_dst)
+    except Exception:
+        pass
     with connect() as con:
         con.execute(
             """
             update textures
-            set design_canvas_path = ?, fit_source = ?, width = ?, height = ?, version = version + 1
+            set design_canvas_path = ?, design_canvas_thumb_path = ?, fit_source = ?, width = ?, height = ?, version = version + 1
             where id = ? and project_id = ?
             """,
             (
                 rel_path(design_path),
+                design_canvas_thumb_path,
                 texture_source,
                 int(design_canvas.get("width") or texture["width"]),
                 int(design_canvas.get("height") or texture["height"]),
@@ -1735,6 +1781,7 @@ def get_asset_dict(asset_id: str) -> dict:
     data = row_to_dict(row)
     data["metadata"] = loads(data["metadata"], {})
     data["url"] = file_url(data["path"])
+    data["thumb_url"] = file_url(data["thumb_path"]) if data.get("thumb_path") else data["url"]
     return data
 
 
@@ -1764,8 +1811,11 @@ def get_texture_row(texture_id: str, project_id: str) -> dict:
 
 def _texture_out(data: dict) -> dict:
     data["source_url"] = file_url(data["source_path"]) if data["source_path"] else ""
+    data["source_thumb_url"] = file_url(data["source_thumb_path"]) if data.get("source_thumb_path") else data["source_url"]
     data["seamless_url"] = file_url(data["seamless_path"]) if data["seamless_path"] else ""
+    data["seamless_thumb_url"] = file_url(data["seamless_thumb_path"]) if data.get("seamless_thumb_path") else data["seamless_url"]
     data["design_canvas_url"] = file_url(data["design_canvas_path"]) if data.get("design_canvas_path") else ""
+    data["design_canvas_thumb_url"] = file_url(data["design_canvas_thumb_path"]) if data.get("design_canvas_thumb_path") else data["design_canvas_url"]
     data["analysis"] = loads(data.get("analysis"), {})
     return data
 

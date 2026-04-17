@@ -307,19 +307,21 @@ function useHoverPreview() {
 export function AssetThumb({
   id,
   url,
+  previewUrl,
   selected,
   onSelect,
   onDelete,
 }: {
   id: string;
   url: string;
+  previewUrl?: string;
   selected?: boolean;
   onSelect: () => void;
   onDelete: () => void;
 }) {
   const { preview, register } = useHoverPreview();
   return (
-    <div ref={register(id, url)} className="relative shrink-0">
+    <div ref={register(id, previewUrl || url)} className="relative shrink-0">
       <button
         type="button"
         onClick={onSelect}
@@ -425,10 +427,11 @@ export function ResourceBar({
               <div className="mb-1 text-sm font-semibold text-slate-700">面料 ({textures.length})</div>
               <div className="flex gap-2 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {textures.map((t) => {
-                  const thumb = t.design_canvas_url || t.seamless_url || t.source_url;
+                  const thumb = t.design_canvas_thumb_url || t.seamless_thumb_url || t.source_thumb_url || t.design_canvas_url || t.seamless_url || t.source_url;
+                  const preview = t.design_canvas_url || t.seamless_url || t.source_url;
                   const isActive = t.id === activeTextureId;
                   return (
-                    <div key={t.id} ref={register(t.id, thumb || "")} className="relative shrink-0">
+                    <div key={t.id} ref={register(t.id, preview || "")} className="relative shrink-0">
                       <button
                         type="button"
                         onClick={() => onSelectTexture(t.id)}
@@ -466,9 +469,9 @@ export function ResourceBar({
               <div className="mb-1 text-sm font-semibold text-slate-700">图片 ({imageLayers.length})</div>
               <div className="flex gap-2 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {imageLayers.map((layer) => {
-                  const thumb = layer.source_url || "";
+                  const thumb = layer.thumb_url || layer.source_url || "";
                   return (
-                    <div key={layer.id} ref={register(layer.id, thumb)} className="relative shrink-0">
+                    <div key={layer.id} ref={register(layer.id, layer.source_url || "")} className="relative shrink-0">
                       <div className="h-14 w-14 overflow-hidden rounded-lg border border-line bg-slate-50">
                         {thumb ? (
                           <img src={thumb} alt={layer.name} className="h-full w-full object-cover" />

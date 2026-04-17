@@ -37,6 +37,17 @@ def image_size(path: Path) -> tuple[int, int]:
         raise RuntimeError(f"无法加载图片 {path}: {exc}") from exc
 
 
+THUMB_SIZE = (256, 256)
+
+
+def create_thumbnail(src: Path, dst: Path, size: tuple[int, int] = THUMB_SIZE) -> None:
+    with Image.open(src) as img:
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGBA")
+        img.thumbnail(size, Image.Resampling.LANCZOS)
+        img.save(dst, "PNG")
+
+
 def ensure_dimensions_within_limit(width: int, height: int) -> None:
     pixels = int(width) * int(height)
     if pixels > MAX_IMAGE_PIXELS:

@@ -475,11 +475,23 @@ export function StudioPage() {
 
   async function upload(kind: string, file: File) {
     if (!project) return;
-    setNotice(`上传 ${file.name}...`);
-    const asset = await api.uploadAsset(project.id, kind, file);
-    setAssets((current) => [asset, ...current]);
-    setNotice(`${file.name} 已上传。`);
-    return asset;
+    let progress = 0;
+    setNotice("上传图片进行中… 0%");
+    const timer = setInterval(() => {
+      progress = Math.min(0.95, progress + 0.05);
+      setNotice(`上传图片进行中… ${Math.round(progress * 100)}%`);
+    }, 1000);
+    try {
+      const asset = await api.uploadAsset(project.id, kind, file);
+      setAssets((current) => [asset, ...current]);
+      setNotice("上传图片成功");
+      return asset;
+    } catch (error) {
+      setNotice("上传图片失败");
+      throw error;
+    } finally {
+      clearInterval(timer);
+    }
   }
 
   async function handleTexture(sourceType: TextureSourceType, file?: File) {
@@ -683,6 +695,7 @@ export function StudioPage() {
       const anchor = designCanvas.design_anchors?.[designCanvas.anchor] || { x: designCanvas.width / 2, y: designCanvas.height / 2 };
       layer.name = "AI 图片层";
       layer.source_url = texture.source_url || (texture.source_path ? `/files/${texture.source_path}` : "");
+      layer.thumb_url = texture.source_thumb_url || texture.source_url || (texture.source_path ? `/files/${texture.source_path}` : "");
       layer.width = width;
       layer.height = height;
       layer.x = Math.round(anchor.x - width / 2);
@@ -1019,12 +1032,13 @@ export function StudioPage() {
                   >
                     <div className="flex flex-wrap gap-2">
                       {textures.map((t) => {
-                        const thumb = t.design_canvas_url || t.seamless_url || t.source_url;
+                        const thumb = t.design_canvas_thumb_url || t.seamless_thumb_url || t.source_thumb_url || t.design_canvas_url || t.seamless_url || t.source_url;
                         return (
                           <AssetThumb
                             key={t.id}
                             id={`tp-${t.id}`}
                             url={thumb || ""}
+                            previewUrl={t.design_canvas_url || t.seamless_url || t.source_url}
                             selected={t.id === activeTexture?.id}
                             onSelect={() => {
                               handleSelectTexture(t.id);
@@ -1261,7 +1275,8 @@ export function StudioPage() {
                       <AssetThumb
                         key={layer.id}
                         id={`lp-${layer.id}`}
-                        url={layer.source_url || ""}
+                        url={layer.thumb_url || layer.source_url || ""}
+                        previewUrl={layer.source_url || ""}
                         selected={layer.id === selectedLayerId}
                         onSelect={() => {
                           setSelectedLayerId(layer.id);
@@ -1275,6 +1290,7 @@ export function StudioPage() {
                 <div className="grid gap-2">
                   {designLayers.map((layer) => {
                     const layerImageUrl = layer.source_url || (layer.asset_id ? assets.find((a) => a.id === layer.asset_id)?.url : "") || "";
+                    const layerThumbUrl = layer.thumb_url || layerImageUrl;
                     return (
                       <button
                         key={layer.id}
@@ -1286,9 +1302,9 @@ export function StudioPage() {
                             <span className="block truncate font-semibold">{layer.name}</span>
                             <span className="text-xs text-slate-500">{layer.type === "image" ? "图片层" : "文字层"} · {layer.visible ? "显示" : "隐藏"} · {layer.locked ? "锁定" : "可编辑"}</span>
                           </div>
-                          {layer.type === "image" && layerImageUrl && (
+                          {layer.type === "image" && layerThumbUrl && (
                             <div className="group relative shrink-0">
-                              <img className="h-10 w-10 rounded-md object-cover" src={layerImageUrl} alt="" />
+                              <img className="h-10 w-10 rounded-md object-cover" src={layerThumbUrl} alt="" />
                               <div className="pointer-events-none absolute bottom-full right-0 z-50 mb-1 hidden rounded-lg border border-line bg-white p-1 shadow-lg group-hover:block">
                                 <img className="max-h-40 max-w-40 rounded-md object-contain" src={layerImageUrl} alt="" />
                               </div>

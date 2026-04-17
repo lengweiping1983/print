@@ -219,6 +219,7 @@ def ensure_schema() -> None:
             con.executescript(SCHEMA_SQL)
             ensure_system_project(con)
             ensure_projects_template_set_id_column(con)
+            ensure_asset_columns(con)
             ensure_texture_columns(con)
             ensure_template_set_columns(con)
             ensure_size_template_pieces_columns(con)
@@ -305,6 +306,12 @@ def ensure_fabric_prompts_data(con: sqlite3.Connection) -> None:
         )
 
 
+def ensure_asset_columns(con: sqlite3.Connection) -> None:
+    columns = {row[1] for row in con.execute("pragma table_info(assets)").fetchall()}
+    if "thumb_path" not in columns:
+        con.execute("alter table assets add column thumb_path text not null default ''")
+
+
 def ensure_texture_columns(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("pragma table_info(textures)").fetchall()}
     additions = {
@@ -313,6 +320,9 @@ def ensure_texture_columns(con: sqlite3.Connection) -> None:
         "fit_source": "text not null default 'source'",
         "seamless_mode": "text not null default ''",
         "analysis": "text not null default '{}'",
+        "source_thumb_path": "text not null default ''",
+        "seamless_thumb_path": "text not null default ''",
+        "design_canvas_thumb_path": "text not null default ''",
     }
     for name, definition in additions.items():
         if name not in columns:

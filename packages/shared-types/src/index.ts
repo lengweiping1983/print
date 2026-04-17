@@ -19,6 +19,7 @@ export type Asset = {
   filename: string;
   path: string;
   url: string;
+  thumb_url?: string;
   width: number;
   height: number;
   sha256: string;
@@ -81,6 +82,7 @@ export type DesignLayer = {
   target_piece_ids: string[];
   asset_id?: string;
   source_url?: string;
+  thumb_url?: string;
   content?: string;
   font_size?: number;
   font_weight?: string;
@@ -200,10 +202,13 @@ export type Texture = {
   source_type: string;
   source_path: string;
   source_url: string;
+  source_thumb_url?: string;
   seamless_path: string;
   seamless_url: string;
+  seamless_thumb_url?: string;
   design_canvas_path: string;
   design_canvas_url: string;
+  design_canvas_thumb_url?: string;
   fit_source_recommendation: "source" | "seamless";
   fit_source: "source" | "seamless";
   seamless_mode: string;
