@@ -26,6 +26,7 @@ export const api = {
     return request<Project>(`/api/projects/${projectId}`);
   },
   patchProjectUIState(projectId: string, payload: {
+    selected_set_id: string;
     selected_piece_id: string;
     global_texture_scale: number;
     texture_angle: number;

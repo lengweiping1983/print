@@ -1654,6 +1654,7 @@ def patch_project_ui_state(project_id: str, payload: ProjectUIStatePatch) -> dic
     project = get_project_dict(project_id)
     export_config = dict(project.get("export_config") or {})
     export_config["ui_state"] = {
+        "selected_set_id": payload.selected_set_id,
         "selected_piece_id": payload.selected_piece_id,
         "global_texture_scale": payload.global_texture_scale,
         "texture_angle": payload.texture_angle,

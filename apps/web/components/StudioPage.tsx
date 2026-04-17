@@ -292,12 +292,20 @@ export function StudioPage() {
         const [restored, sets] = await Promise.all([loadInitialProject(), api.listTemplateSets()]);
         if (!active) return;
         const availableSets = sets.filter((s) => s.mapping_confirmed_at && !s.has_mapping_issues);
+        const currentSetId = restored.project.template_set_id;
+        let displaySets = availableSets;
+        if (currentSetId && !displaySets.some((s) => s.id === currentSetId)) {
+          const currentSet = sets.find((s) => s.id === currentSetId);
+          if (currentSet) {
+            displaySets = [currentSet, ...displaySets];
+          }
+        }
         setProject(restored.project);
         setDesignCanvas(readDesignCanvas(restored.project));
         setPieces(restored.pieces);
         setPieceDefaults(extractPieceDefaults(restored.pieces));
         const ui = (restored.project.export_config as any)?.ui_state || {};
-        setSelectedSetId(restored.project.template_set_id || "");
+        setSelectedSetId(ui.selected_set_id || restored.project.template_set_id || "");
         setSelectedPieceId(ui.selected_piece_id || restored.pieces[0]?.id || "");
         setGlobalTextureScale(ui.global_texture_scale ?? 1);
         setTextureAngle(ui.texture_angle ?? 0);
@@ -312,7 +320,7 @@ export function StudioPage() {
           texture_offset_y: ui.global_offset_y ?? 0,
         });
         setTextures(restored.textures);
-        setTemplateSets(availableSets);
+        setTemplateSets(displaySets);
         localStorage.setItem(LAST_PROJECT_KEY, restored.project.id);
         setNotice(restored.created ? "项目已创建，请在左侧选择模板开始打样。" : "已恢复最近的裁片项目。");
       } catch (error) {
@@ -330,6 +338,7 @@ export function StudioPage() {
   useEffect(() => {
     if (!project) return;
     const payload = {
+      selected_set_id: selectedSetId,
       selected_piece_id: selectedPieceId,
       global_texture_scale: globalTextureScale,
       texture_angle: textureAngle,
@@ -339,7 +348,7 @@ export function StudioPage() {
       global_anchor: globalAnchor,
     };
     void api.patchProjectUIState(project.id, payload);
-  }, [project?.id, selectedPieceId, globalTextureScale, textureAngle, globalOffsetX, globalOffsetY, globalSymmetry, globalAnchor]);
+  }, [project?.id, selectedSetId, selectedPieceId, globalTextureScale, textureAngle, globalOffsetX, globalOffsetY, globalSymmetry, globalAnchor]);
 
   useEffect(() => {
     if (!job) {
@@ -944,6 +953,7 @@ export function StudioPage() {
                     {templateSets.map((set) => (
                       <option key={set.id} value={set.id}>
                         {set.name} {set.version_label ? `(${set.version_label})` : ""}
+                        {(!set.mapping_confirmed_at || set.has_mapping_issues) ? " [待确认]" : ""}
                       </option>
                     ))}
                   </select>

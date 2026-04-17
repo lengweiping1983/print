@@ -21,6 +21,7 @@ class ProjectOut(ProjectCreate):
 
 
 class ProjectUIStatePatch(BaseModel):
+    selected_set_id: str = ""
     selected_piece_id: str = ""
     global_texture_scale: float = 1.0
     texture_angle: float = 0.0
