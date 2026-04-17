@@ -626,7 +626,7 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
         <Layer>
           <Rect x={0} y={0} width={stageWidth} height={stageHeight} fill="#ffffff" />
           {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先选择套装！" fill="#64748b" fontSize={18} />}
-          {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成面料" fill="#64748b" fontSize={18} />}
+          {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或处理面料" fill="#64748b" fontSize={18} />}
         </Layer>
         {previewTextureImage && displayPiece && selectedMaskFrame && (
           <DimmedTextureLayer

@@ -354,7 +354,7 @@ export function StudioPage() {
     if (!j) return "任务";
     if (j.job_type === "texture_generate") {
       const input = (j.input || {}) as Record<string, unknown>;
-      return input.source_type === "ai" ? "图片生成" : "面料生成";
+      return input.source_type === "ai" ? "图片生成" : "面料处理";
     }
     return (j.job_type && JOB_TYPE_LABELS[j.job_type]) || j.job_type || "任务";
   }
@@ -513,7 +513,7 @@ export function StudioPage() {
         const asset = await upload(sourceType === "garment_photo" ? "garment_photo" : "pattern", file, true);
         assetId = asset?.id ?? "";
       }
-      setNotice("正在生成面料任务...");
+      setNotice("正在处理面料...");
       const created = await api.generateTexture(project.id, assetId, sourceType, texturePrompt);
       const done = await waitForJob(created.job_id, setJob);
       const texture = done.output.texture as Texture;
@@ -651,7 +651,7 @@ export function StudioPage() {
 
   async function addImageLayer() {
     if (!canUseLayers || !designCanvas) {
-      setNotice("请先上传或生成面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
+      setNotice("请先上传或处理面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
       return;
     }
     const asset = assets.find((item) => item.kind === "pattern" || item.kind === "garment_photo");
@@ -668,7 +668,7 @@ export function StudioPage() {
 
   async function handleLayerUpload(file: File) {
     if (!project || !designCanvas) {
-      setNotice("请先上传或生成面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
+      setNotice("请先上传或处理面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
       return;
     }
     setNotice(`上传 ${file.name}...`);
@@ -684,7 +684,7 @@ export function StudioPage() {
 
   async function handleLayerAiImage() {
     if (!project || !designCanvas) {
-      setNotice("请先上传或生成面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
+      setNotice("请先上传或处理面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
       return;
     }
     const trimmedPrompt = layerPrompt.trim();
@@ -723,7 +723,7 @@ export function StudioPage() {
 
   async function addTextLayer() {
     if (!canUseLayers || !designCanvas) {
-      setNotice("请先上传或生成面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
+      setNotice("请先上传或处理面料，并点击“自动适配面料”生成全局设计画布后，再添加图层。");
       return;
     }
     const layer = createLayer("text", designCanvas);
@@ -1061,13 +1061,13 @@ export function StudioPage() {
                     </div>
                   </AssetPickerPopover>
                   {(() => {
-                    const isUploadingFabric = notice.startsWith("上传图片进行中");
+                    const showProgressPlaceholder = !activeTexture && !!notice && (notice.includes("进行中") || notice.includes("排队中"));
                     return (
                       <>
                         <div className="relative">
                           {activeTexture ? (
                             <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前面料" />
-                          ) : isUploadingFabric ? (
+                          ) : showProgressPlaceholder ? (
                             <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-base font-semibold text-slate-700">
                               {notice}
                             </div>
@@ -1083,7 +1083,7 @@ export function StudioPage() {
                           )}
                         </div>
                         <p className="m-0 text-xs text-slate-500">
-                          {activeTexture ? `面料大小：${activeTexture.width} x ${activeTexture.height}` : isUploadingFabric ? "" : "面料大小：未生成"}
+                          {activeTexture ? `面料大小：${activeTexture.width} x ${activeTexture.height}` : showProgressPlaceholder ? "" : "面料大小：未生成"}
                         </p>
                       </>
                     );

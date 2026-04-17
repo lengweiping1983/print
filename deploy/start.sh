@@ -43,13 +43,24 @@ else
     echo "swap 已存在: ${SWAP_TOTAL}MB"
 fi
 
-# 3. 停止已有的服务（如果存在）
+# 3. 自动安装/更新 Python 依赖（确保 opencv-python-headless 等已就绪）
+echo "检查并安装 Python 依赖..."
+pip3 install -q -r "$API_DIR/requirements.txt"
+
+# 4. 检查 opencv 是否可用（大图分析必需，避免回退到极慢的 Pillow 纯 Python 路径）
+if ! python3 -c "import cv2" 2>/dev/null; then
+    echo "警告: opencv-python-headless 未正确安装，大图处理可能极慢或导致服务器卡死"
+    echo "正在尝试强制安装..."
+    pip3 install --force-reinstall opencv-python-headless
+fi
+
+# 5. 停止已有的服务（如果存在）
 echo "尝试停止已有进程..."
 pkill -f "uvicorn app.main:app --host 0.0.0.0 --port 8000" 2>/dev/null || true
 pkill -f "next start --port 3000" 2>/dev/null || true
 sleep 2
 
-# 4. 启动后端
+# 6. 启动后端
 echo "启动后端 FastAPI (0.0.0.0:8000)..."
 cd "$API_DIR"
 nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$PROJECT_DIR/logs-api.log" 2>&1 &

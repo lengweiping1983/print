@@ -76,6 +76,14 @@ ALLOWED_UPLOAD_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".t
 async def lifespan(_: FastAPI):
     init_db()
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        import cv2
+        logger.info("opencv-python-headless 已加载，版本: %s", cv2.__version__)
+    except Exception:
+        logger.warning(
+            "未检测到 opencv-python-headless。大图分析将回退到纯 Pillow 路径，"
+            "可能导致处理极慢或 2G 服务器卡死。请执行: pip install opencv-python-headless"
+        )
     yield
 
 

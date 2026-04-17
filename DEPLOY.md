@@ -94,8 +94,11 @@ EOF
 ```bash
 cd /opt/print
 
-# Python 依赖
+# Python 依赖（包含 opencv-python-headless，大图分析必需）
 pip3 install -r apps/api/requirements.txt
+
+# 验证 opencv 是否安装成功（避免大图处理回退到极慢的 Pillow 路径）
+python3 -c "import cv2; print('opencv-python-headless 版本:', cv2.__version__)"
 
 # Node 依赖
 npm install
