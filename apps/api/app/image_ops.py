@@ -24,6 +24,21 @@ except Exception:  # pragma: no cover - fallback keeps Pillow-only installs usab
     cv2 = None
     np = None
 
+import threading
+
+ANALYSIS_MAX_SIDE = 2048
+HEAVY_IMAGE_OPS_SEMAPHORE = threading.Semaphore(1)
+
+
+def _analysis_copy(img: Image.Image, max_side: int = ANALYSIS_MAX_SIDE) -> Image.Image:
+    """Return a downsampled copy for heavy analysis if the image exceeds max_side."""
+    width, height = img.size
+    if max(width, height) <= max_side:
+        return img
+    scale = max_side / max(width, height)
+    new_size = (int(width * scale), int(height * scale))
+    return img.resize(new_size, Image.Resampling.LANCZOS)
+
 
 def image_size(path: Path) -> tuple[int, int]:
     try:
@@ -103,31 +118,32 @@ def make_layout_template_from_image(
 ) -> Path:
     ensure_dimensions_within_limit(*img.size)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    rgba = img.convert("RGBA")
-    r, g, b, alpha = rgba.split()
-    white = r.point(lambda value: 255 if value >= white_threshold else 0)
-    white = ImageChops.multiply(white, g.point(lambda value: 255 if value >= white_threshold else 0))
-    white = ImageChops.multiply(white, b.point(lambda value: 255 if value >= white_threshold else 0))
-    max_channel = ImageChops.lighter(r, ImageChops.lighter(g, b))
-    min_channel = ImageChops.darker(r, ImageChops.darker(g, b))
-    neutral = ImageChops.subtract(max_channel, min_channel).point(lambda value: 255 if value <= channel_delta else 0)
-    candidate = ImageChops.multiply(white, neutral)
-    transparent = alpha.point(lambda value: 255 if value <= 10 else 0)
-    candidate = ImageChops.lighter(candidate, transparent)
-    width, height = candidate.size
-    background = _edge_connected_background(candidate)
-    if background is None:
-        background = _scanline_edge_connected_background(candidate.tobytes(), width, height)
-        alpha_bytes = bytearray(width * height)
-        for idx, is_background in enumerate(background):
-            alpha_bytes[idx] = 0 if is_background else 255
-        alpha_mask = Image.frombytes("L", (width, height), bytes(alpha_bytes))
-    else:
-        alpha_mask = Image.fromarray(np.where(background, 0, 255).astype("uint8"))
+    with HEAVY_IMAGE_OPS_SEMAPHORE:
+        rgba = _analysis_copy(img.convert("RGBA"))
+        r, g, b, alpha = rgba.split()
+        white = r.point(lambda value: 255 if value >= white_threshold else 0)
+        white = ImageChops.multiply(white, g.point(lambda value: 255 if value >= white_threshold else 0))
+        white = ImageChops.multiply(white, b.point(lambda value: 255 if value >= white_threshold else 0))
+        max_channel = ImageChops.lighter(r, ImageChops.lighter(g, b))
+        min_channel = ImageChops.darker(r, ImageChops.darker(g, b))
+        neutral = ImageChops.subtract(max_channel, min_channel).point(lambda value: 255 if value <= channel_delta else 0)
+        candidate = ImageChops.multiply(white, neutral)
+        transparent = alpha.point(lambda value: 255 if value <= 10 else 0)
+        candidate = ImageChops.lighter(candidate, transparent)
+        width, height = candidate.size
+        background = _edge_connected_background(candidate)
+        if background is None:
+            background = _scanline_edge_connected_background(candidate.tobytes(), width, height)
+            alpha_bytes = bytearray(width * height)
+            for idx, is_background in enumerate(background):
+                alpha_bytes[idx] = 0 if is_background else 255
+            alpha_mask = Image.frombytes("L", (width, height), bytes(alpha_bytes))
+        else:
+            alpha_mask = Image.fromarray(np.where(background, 0, 255).astype("uint8"))
 
-    out = rgba.copy()
-    out.putalpha(alpha_mask)
-    out.save(out_path)
+        out = rgba.copy()
+        out.putalpha(alpha_mask)
+        out.save(out_path)
     return out_path
 
 
@@ -156,19 +172,20 @@ def make_red_marker_mask_from_image(
 ) -> Path | None:
     ensure_dimensions_within_limit(*img.size)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    rgba = img.convert("RGBA")
-    r, g, b, alpha = rgba.split()
-    max_non_red = ImageChops.lighter(g, b)
-    strong_red = ImageChops.subtract(r, max_non_red)
-    mask = r.point(lambda value: 255 if value >= red_min else 0)
-    mask = ImageChops.multiply(mask, strong_red.point(lambda value: 255 if value >= red_delta else 0))
-    mask = ImageChops.multiply(mask, alpha.point(lambda value: 255 if value > 10 else 0))
+    with HEAVY_IMAGE_OPS_SEMAPHORE:
+        rgba = _analysis_copy(img.convert("RGBA"))
+        r, g, b, alpha = rgba.split()
+        max_non_red = ImageChops.lighter(g, b)
+        strong_red = ImageChops.subtract(r, max_non_red)
+        mask = r.point(lambda value: 255 if value >= red_min else 0)
+        mask = ImageChops.multiply(mask, strong_red.point(lambda value: 255 if value >= red_delta else 0))
+        mask = ImageChops.multiply(mask, alpha.point(lambda value: 255 if value > 10 else 0))
 
-    if not mask.getbbox():
-        out_path.unlink(missing_ok=True)
-        return None
+        if not mask.getbbox():
+            out_path.unlink(missing_ok=True)
+            return None
 
-    mask.save(out_path)
+        mask.save(out_path)
     return out_path
 
 
@@ -306,61 +323,63 @@ def extract_alpha_components_from_image(
 ) -> list[dict]:
     ensure_dimensions_within_limit(*img.size)
     out_dir.mkdir(parents=True, exist_ok=True)
-    alpha = img.convert("RGBA").getchannel("A")
-    width, height = alpha.size
-    alpha_bytes = alpha.tobytes()
-    cv2_pieces = _extract_alpha_components_cv2(alpha, out_dir, min_area)
-    if cv2_pieces is not None:
-        return cv2_pieces
+    with HEAVY_IMAGE_OPS_SEMAPHORE:
+        rgba = _analysis_copy(img.convert("RGBA"))
+        alpha = rgba.getchannel("A")
+        width, height = alpha.size
+        alpha_bytes = alpha.tobytes()
+        cv2_pieces = _extract_alpha_components_cv2(alpha, out_dir, min_area)
+        if cv2_pieces is not None:
+            return cv2_pieces
 
-    mask = bytearray(1 if a > 10 else 0 for a in alpha_bytes)
-    visited = bytearray(width * height)
-    pieces: list[dict] = []
+        mask = bytearray(1 if a > 10 else 0 for a in alpha_bytes)
+        visited = bytearray(width * height)
+        pieces: list[dict] = []
 
-    start = 0
-    while True:
-        start = mask.find(1, start)
-        if start == -1:
-            break
+        start = 0
+        while True:
+            start = mask.find(1, start)
+            if start == -1:
+                break
 
-        spans, area, min_x, min_y, max_x, max_y, sum_x, sum_y = _collect_component_spans(start, mask, visited, width, height)
-        for left, right, y in spans:
-            row_start = y * width
-            mask[row_start + left : row_start + right + 1] = b"\0" * (right - left + 1)
-        start += 1
-        if area < min_area:
-            continue
+            spans, area, min_x, min_y, max_x, max_y, sum_x, sum_y = _collect_component_spans(start, mask, visited, width, height)
+            for left, right, y in spans:
+                row_start = y * width
+                mask[row_start + left : row_start + right + 1] = b"\0" * (right - left + 1)
+            start += 1
+            if area < min_area:
+                continue
 
-        piece_w = max_x - min_x + 1
-        piece_h = max_y - min_y + 1
-        piece = Image.new("L", (piece_w, piece_h), 0)
-        draw = ImageDraw.Draw(piece)
-        for left, right, y in spans:
-            draw.line((left - min_x, y - min_y, right - min_x, y - min_y), fill=255)
+            piece_w = max_x - min_x + 1
+            piece_h = max_y - min_y + 1
+            piece = Image.new("L", (piece_w, piece_h), 0)
+            draw = ImageDraw.Draw(piece)
+            for left, right, y in spans:
+                draw.line((left - min_x, y - min_y, right - min_x, y - min_y), fill=255)
 
-        piece_index = len(pieces) + 1
-        mask_name = f"piece_{piece_index:02d}_mask.png"
-        mask_path = out_dir / mask_name
-        piece.save(mask_path)
-        polygon = bbox_polygon(min_x, min_y, max_x, max_y)
+            piece_index = len(pieces) + 1
+            mask_name = f"piece_{piece_index:02d}_mask.png"
+            mask_path = out_dir / mask_name
+            piece.save(mask_path)
+            polygon = bbox_polygon(min_x, min_y, max_x, max_y)
 
-        pieces.append(
-            {
-                "mask_path": mask_path,
-                "polygon": polygon,
-                "bbox": {"x": min_x, "y": min_y, "width": piece_w, "height": piece_h},
-                "source_x": min_x,
-                "source_y": min_y,
-                "width": piece_w,
-                "height": piece_h,
-                "area": area,
-                "centroid_x": sum_x / area,
-                "centroid_y": sum_y / area,
-            }
-        )
+            pieces.append(
+                {
+                    "mask_path": mask_path,
+                    "polygon": polygon,
+                    "bbox": {"x": min_x, "y": min_y, "width": piece_w, "height": piece_h},
+                    "source_x": min_x,
+                    "source_y": min_y,
+                    "width": piece_w,
+                    "height": piece_h,
+                    "area": area,
+                    "centroid_x": sum_x / area,
+                    "centroid_y": sum_y / area,
+                }
+            )
 
-    pieces.sort(key=lambda p: p["area"], reverse=True)
-    return pieces
+        pieces.sort(key=lambda p: p["area"], reverse=True)
+        return pieces
 
 
 def _extract_alpha_components_cv2(alpha: Image.Image, out_dir: Path, min_area: int) -> list[dict] | None:

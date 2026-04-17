@@ -1060,23 +1060,34 @@ export function StudioPage() {
                       })}
                     </div>
                   </AssetPickerPopover>
-                  <div className="relative">
-                    {activeTexture ? (
-                      <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前面料" />
-                    ) : (
-                      <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm text-slate-500">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                          <circle cx="8.5" cy="8.5" r="1.5" />
-                          <polyline points="21 15 16 10 5 21" />
-                        </svg>
-                        暂无面料
-                      </div>
-                    )}
-                  </div>
-                  <p className="m-0 text-xs text-slate-500">
-                    {activeTexture ? `面料大小：${activeTexture.width} x ${activeTexture.height}` : "面料大小：未生成"}
-                  </p>
+                  {(() => {
+                    const isUploadingFabric = notice.startsWith("上传图片进行中");
+                    return (
+                      <>
+                        <div className="relative">
+                          {activeTexture ? (
+                            <img className="checkerboard h-40 w-full rounded-lg object-contain" src={selectedInputTextureUrl} alt="当前面料" />
+                          ) : isUploadingFabric ? (
+                            <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-base font-semibold text-slate-700">
+                              {notice}
+                            </div>
+                          ) : (
+                            <div className="checkerboard flex h-40 w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line text-sm text-slate-500">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                <circle cx="8.5" cy="8.5" r="1.5" />
+                                <polyline points="21 15 16 10 5 21" />
+                              </svg>
+                              暂无面料
+                            </div>
+                          )}
+                        </div>
+                        <p className="m-0 text-xs text-slate-500">
+                          {activeTexture ? `面料大小：${activeTexture.width} x ${activeTexture.height}` : isUploadingFabric ? "" : "面料大小：未生成"}
+                        </p>
+                      </>
+                    );
+                  })()}
                   {activeTexture ? (
                     <>
                     <p className="m-0 rounded-lg bg-mist p-3 text-xs leading-5 text-slate-600">
