@@ -1,3 +1,7 @@
+.env
+.env.local
+.env.*.local
+apps/api/.env
 node_modules/
 .DS_Store
 .next/
@@ -14,3 +18,5 @@ storage/*
 storage/projects/*
 !storage/projects/.gitkeep
 
+logs-*.log
+nohup.out

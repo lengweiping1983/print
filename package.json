@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
-    "dev:api": "cd apps/api && python3 -m uvicorn app.main:app --reload --port 8000",
+    "dev:api": "export $(grep -v '^#' apps/api/.env | xargs) && cd apps/api && python3 -m uvicorn app.main:app --reload --port 8000",
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
     "test:api": "cd apps/api && python3 -m pytest",
     "typecheck": "npm --workspace apps/web run typecheck"
