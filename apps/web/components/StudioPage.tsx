@@ -861,7 +861,7 @@ export function StudioPage() {
         </div>
       </header>
 
-      <div className="grid grid-cols-[340px_minmax(720px,1fr)_minmax(520px,0.95fr)] gap-4 max-[1500px]:grid-cols-1">
+      <div className="grid grid-cols-[355px_minmax(705px,1fr)_minmax(520px,0.95fr)] gap-4 max-[1500px]:grid-cols-1">
         <aside className="space-y-4">
           <div className="flex rounded-lg border border-line bg-white p-1 shadow-panel">
             {[
@@ -928,13 +928,22 @@ export function StudioPage() {
                 title="面料"
                 action={
                   <div className="flex gap-2">
-                    <button className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
+                    {textures.length > 0 && (
+                      <button
+                        type="button"
+                        className="whitespace-nowrap rounded-md bg-white px-2 py-1.5 text-xs font-semibold text-ink ring-1 ring-line"
+                        onClick={() => setShowTexturePicker(true)}
+                      >
+                        选择面料
+                      </button>
+                    )}
+                    <button className="whitespace-nowrap rounded-md bg-ink px-2 py-1.5 text-xs font-semibold text-white" onClick={() => fabricInputRef.current?.click()}>
                       上传面料
                     </button>
-                    <button className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
+                    <button className="whitespace-nowrap rounded-md bg-white px-2 py-1.5 text-xs font-semibold text-ink ring-1 ring-line" onClick={() => garmentInputRef.current?.click()}>
                       上传衣服
                     </button>
-                    <button className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white" onClick={() => { setAiDialogMode("texture"); setShowAiTextureDialog(true); }}>
+                    <button className="whitespace-nowrap rounded-md bg-action px-2 py-1.5 text-xs font-semibold text-white" onClick={() => { setAiDialogMode("texture"); setShowAiTextureDialog(true); }}>
                       AI 生图
                     </button>
                   </div>
@@ -963,20 +972,6 @@ export function StudioPage() {
                       event.currentTarget.value = "";
                     }}
                   />
-                  {textures.length > 0 && (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs text-slate-500">
-                        已选面料：{textures.findIndex((t) => t.id === activeTexture?.id) + 1} / {textures.length}
-                      </span>
-                      <button
-                        type="button"
-                        className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line"
-                        onClick={() => setShowTexturePicker(true)}
-                      >
-                        选择面料
-                      </button>
-                    </div>
-                  )}
                   <AssetPickerPopover
                     open={showTexturePicker}
                     onClose={() => setShowTexturePicker(false)}
