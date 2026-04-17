@@ -75,7 +75,28 @@ scp -r /本地路径/print root@123.45.67.89:/opt/
 
 ---
 
-## 五、部署后端（FastAPI）
+## 五、环境变量配置（重要）
+
+项目支持通过环境变量配置 AI 面料生成 provider 和外部服务接入。建议在生产环境创建 `.env` 文件：
+
+```bash
+cd /opt/print
+sudo tee /opt/print/.env > /dev/null << 'EOFENV'
+# AI 面料生成（可选，未配置时自动回退到本地占位图）
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
+REPLICATE_API_TOKEN=xxxxxxxxxxxxxxxx
+
+# Neodomain 生图服务接入（可选）
+NEODOMAIN_ACCESS_TOKEN=xxxxxxxxxxxxxxxx
+DEFAULT_MODEL_NAME=gemini-3-pro-image-preview
+EOFENV
+```
+
+> 若使用 systemd 托管后端，需要在 service 文件中通过 `EnvironmentFile=/opt/print/.env` 加载这些变量（见下文）。
+
+---
+
+## 六、部署后端（FastAPI）
 
 ### 1. 安装 Python 依赖
 ```bash
@@ -85,6 +106,9 @@ pip3 install -r requirements.txt
 
 ### 2. 验证后端能否启动
 ```bash
+cd /opt/print
+export $(grep -v '^#' .env | xargs)
+cd apps/api
 python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 - 看到 `Uvicorn running on http://0.0.0.0:8000` 即表示成功。
@@ -106,6 +130,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/print/apps/api
+EnvironmentFile=/opt/print/.env
 ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=on-failure
 RestartSec=5
@@ -127,9 +152,10 @@ sudo systemctl status print-api
 
 ---
 
-## 六、部署前端（Next.js）
+## 七、部署前端（Next.js）
 
 ### 1. 安装 npm 依赖
+项目使用 npm workspaces，直接在根目录安装即可：
 ```bash
 cd /opt/print
 npm install
@@ -137,15 +163,9 @@ npm install
 
 ### 2. 配置前端 API 地址
 
-项目已经通过 `NEXT_PUBLIC_API_BASE_URL` 环境变量来指定后端地址。由于我们要用 IP 访问，需要把这个变量设为内网或相对地址。
+项目通过 `NEXT_PUBLIC_API_BASE_URL` 环境变量指定后端地址。`next.config.mjs` 中默认使用 `http://127.0.0.1:8000`，与后端部署在同一台服务器时**通常无需修改**。
 
-> **最简单的方式**：因为前后端部署在同一台服务器，Next.js 服务端请求 `http://127.0.0.1:8000` 就能通，**大多数情况下不改也能跑**。但如果你希望更稳妥，可以显式设置：
-
-```bash
-export NEXT_PUBLIC_API_BASE_URL="http://127.0.0.1:8000"
-```
-
-如果你打算纯静态导出（`next export`），则必须设为外网可访问地址：
+如果你希望显式配置（例如静态导出场景）：
 ```bash
 export NEXT_PUBLIC_API_BASE_URL="http://123.45.67.89:8000"
 ```
@@ -164,11 +184,40 @@ nohup npx next start --port 3000 &
 
 此时访问 `http://<你的服务器IP>:3000` 即可看到页面。
 
-> `nohup ... &` 是简单的后台运行方式。如果希望更稳定，也可以给前端写一份 systemd 服务（参考后端）。
+### 4. 使用 systemd 托管前端（推荐）
+
+为避免 SSH 断开后前端停止，建议也配置 systemd：
+
+```bash
+sudo tee /etc/systemd/system/print-web.service > /dev/null << 'EOFSYSTEMD'
+[Unit]
+Description=Print Studio Web
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/print/apps/web
+ExecStart=/usr/bin/npx next start --port 3000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOFSYSTEMD
+```
+
+启动并设为开机自启：
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable print-web
+sudo systemctl start print-web
+sudo systemctl status print-web
+```
 
 ---
 
-## 七、使用 Nginx 反向代理（强烈推荐）
+## 八、使用 Nginx 反向代理（强烈推荐）
 
 如果你不想让用户记忆 `3000`、`8000` 两个端口，可以用 **Nginx 统一代理到 80 端口**。用户只需要访问 `http://<你的服务器IP>` 即可。
 
@@ -179,7 +228,7 @@ server {
     listen 80;
     server_name _;  # 使用 IP 访问，无需域名
 
-    client_max_body_size 50M;  # 允许上传较大图片
+    client_max_body_size 100M;  # 允许上传较大图片（与后端 MAX_UPLOAD_BYTES 对齐）
 
     # 前端页面
     location / {
@@ -191,7 +240,7 @@ server {
         proxy_cache_bypass $http_upgrade;
     }
 
-    # API 接口
+    # API 接口（包含 /api/ 下所有路由，以及 neodomain 扩展路由）
     location /api/ {
         proxy_pass http://127.0.0.1:8000/api/;
         proxy_set_header Host $host;
@@ -225,7 +274,7 @@ http://<你的服务器IP>
 
 ---
 
-## 八、防火墙 / 安全组配置
+## 九、防火墙 / 安全组配置
 
 ### 1. 阿里云安全组（必须）
 登录阿里云控制台 → ECS → 安全组 → 配置规则，确保放行以下端口：
@@ -251,7 +300,7 @@ sudo ufw reload
 
 ---
 
-## 九、项目升级步骤
+## 十、项目升级步骤
 
 当代码有更新时，按以下步骤重新部署：
 
@@ -268,23 +317,24 @@ pip3 install -r requirements.txt
 cd /opt/print
 
 # 4. 更新前端依赖并重新构建
-cd apps/web
 npm install
+cd apps/web
 npm run build
 cd /opt/print
 
-# 5. 重启后端
+# 5. 重启服务
 sudo systemctl restart print-api
-
-# 6. 重启前端（先杀掉旧进程，再启动）
-pkill -f "next start"
-cd apps/web
-nohup npx next start --port 3000 &
+sudo systemctl restart print-web
 ```
+
+> ⚠️ **重要**：`storage/` 目录包含 SQLite 数据库和所有用户数据，**升级时切勿删除或覆盖该目录**。如果通过 `scp` 或 `rsync` 上传代码，建议显式排除 `storage/` 和 `node_modules/`：
+> ```bash
+> rsync -av --exclude=storage --exclude=node_modules --exclude=.git ./ root@123.45.67.89:/opt/print/
+> ```
 
 ---
 
-## 十、常见问题
+## 十一、常见问题
 
 ### 1. 访问 `http://<IP>:3000` 页面空白或接口报错？
 - 检查后端是否已启动：`curl http://127.0.0.1:8000/docs`
@@ -294,10 +344,11 @@ nohup npx next start --port 3000 &
 ### 2. 上传图片后报错 / 文件找不到？
 - 检查 `storage/` 目录是否有写入权限：`ls -la /opt/print/storage`
 - 确保运行用户（如 root 或 www-data）对项目目录有读写权限
+- 检查 Nginx `client_max_body_size` 是否大于后端 `MAX_UPLOAD_BYTES`（100 MB）
 
 ### 3. 服务器重启后服务没自动启动？
 - 后端：检查 systemd 是否启用 `sudo systemctl is-enabled print-api`
-- 前端：目前用 `nohup` 启动不会自启，建议也配置 systemd 服务
+- 前端：检查 systemd 是否启用 `sudo systemctl is-enabled print-web`
 
 ### 4. 内存不足导致构建失败？
 - Next.js 构建比较吃内存，2G 服务器容易 OOM
@@ -306,25 +357,21 @@ nohup npx next start --port 3000 &
   sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
   ```
 
+### 5. AI 生图一直返回占位图？
+- 检查 `.env` 中是否正确配置了 `OPENAI_API_KEY` 或 `REPLICATE_API_TOKEN`
+- 检查 systemd 服务是否加载了 `EnvironmentFile=/opt/print/.env`
+- 查看后端日志：`sudo journalctl -u print-api -f`
+
 ---
 
-## 十一、最小改动清单
+## 十二、最小改动清单
 
 相比本地开发，部署到阿里云**只需以下调整**：
 
 | 改动项 | 说明 |
 |--------|------|
 | 后端启动命令加 `--host 0.0.0.0` | 让外网可以访问 8000 端口 |
-| 可选：`NEXT_PUBLIC_API_BASE_URL` 环境变量 | 指定前端请求的后端地址 |
+| 配置 `.env` 环境变量 | AI provider Token、Neodomain Token 等 |
+| 可选：`NEXT_PUBLIC_API_BASE_URL` | 指定前端请求的后端地址 |
 | 可选：Nginx 反向代理 | 统一 80 端口入口，隐藏 3000/8000 |
-| **业务代码（db.py / image_ops.py 等）** | **完全不用改** |
-
----
-
-## 十二、联系与反馈
-
-如果在部署过程中遇到环境问题，建议优先检查：
-1. 安全组端口放行
-2. Nginx 配置语法（`sudo nginx -t`）
-3. 后端日志（`sudo journalctl -u print-api -f`）
-4. 前端构建日志（`npm run build` 的输出）
+| **业务代码** | **完全不用改** |
