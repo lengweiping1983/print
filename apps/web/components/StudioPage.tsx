@@ -350,6 +350,15 @@ export function StudioPage() {
     void api.patchProjectUIState(project.id, payload);
   }, [project?.id, selectedSetId, selectedPieceId, globalTextureScale, textureAngle, globalOffsetX, globalOffsetY, globalSymmetry, globalAnchor]);
 
+  function resolveJobLabel(j: Job | null): string {
+    if (!j) return "任务";
+    if (j.job_type === "texture_generate") {
+      const input = (j.input || {}) as Record<string, unknown>;
+      return input.source_type === "ai" ? "图片生成" : "面料生成";
+    }
+    return (j.job_type && JOB_TYPE_LABELS[j.job_type]) || j.job_type || "任务";
+  }
+
   useEffect(() => {
     if (!job) {
       prevJobRef.current = null;
@@ -360,7 +369,7 @@ export function StudioPage() {
       return;
     }
     prevJobRef.current = job;
-    const typeLabel = (job.job_type && JOB_TYPE_LABELS[job.job_type]) || job.job_type || "任务";
+    const typeLabel = resolveJobLabel(job);
     if (job.status === "queued") {
       setNotice(`${typeLabel}排队中…`);
     } else if (job.status === "succeeded") {
@@ -372,7 +381,7 @@ export function StudioPage() {
 
   useEffect(() => {
     if (job?.status === "running") {
-      const typeLabel = (job.job_type && JOB_TYPE_LABELS[job.job_type]) || job.job_type || "任务";
+      const typeLabel = resolveJobLabel(job);
       setNotice(`${typeLabel}进行中… ${Math.round(displayProgress * 100)}%`);
     }
   }, [job?.id, job?.status, job?.job_type, displayProgress]);
@@ -473,8 +482,9 @@ export function StudioPage() {
     setAvoidZoneMinPx(readNumber(designCanvas.avoid_zone_min_px, DEFAULT_AVOID_ZONE_MIN_PX));
   }, [designCanvas]);
 
-  async function upload(kind: string, file: File) {
+  async function upload(kind: string, file: File, silentSuccess: boolean = false) {
     if (!project) return;
+    setJob(null);
     let progress = 0;
     setNotice("上传图片进行中… 0%");
     const timer = setInterval(() => {
@@ -484,7 +494,7 @@ export function StudioPage() {
     try {
       const asset = await api.uploadAsset(project.id, kind, file);
       setAssets((current) => [asset, ...current]);
-      setNotice("上传图片成功");
+      if (!silentSuccess) setNotice("上传图片成功");
       return asset;
     } catch (error) {
       setNotice("上传图片失败");
@@ -500,7 +510,7 @@ export function StudioPage() {
       let assetId = "";
       if (file) {
         setTextureFileName(file.name);
-        const asset = await upload(sourceType === "garment_photo" ? "garment_photo" : "pattern", file);
+        const asset = await upload(sourceType === "garment_photo" ? "garment_photo" : "pattern", file, true);
         assetId = asset?.id ?? "";
       }
       setNotice("正在生成面料任务...");
