@@ -167,11 +167,12 @@ export default function TemplateSetDetailPage() {
     });
   }
 
-  async function setBase(sizeTemplateId: string) {
+  async function setBase(sizeTemplateId: string, sizeName: string) {
     if (!setId) return;
+    if (!confirm(`确定将 ${sizeName} 设为基准尺寸吗？\n变更基准后，裁片对照表需要重新确认才能被项目使用。`)) return;
     await api.setTemplateSetBaseSize(setId, sizeTemplateId);
     await refresh();
-    setNotice("基准尺寸已更新");
+    setNotice(`基准尺寸已更新为 ${sizeName}，裁片对照表确认状态已重置，请重新确认后才能在项目中使用。`);
   }
 
   async function removeSize(sizeId: string, sizeName: string) {
@@ -632,7 +633,7 @@ export default function TemplateSetDetailPage() {
                 </Link>
                 {!size.is_base && (
                   <button
-                    onClick={() => setBase(size.id)}
+                    onClick={() => setBase(size.id, size.size_name)}
                     className="rounded bg-jade px-3 py-1.5 text-sm font-semibold text-white"
                   >
                     设为基准

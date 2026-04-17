@@ -37,6 +37,8 @@ type TextureSnapSettings = {
   periodY: number;
 };
 
+type TextureImageSource = HTMLImageElement | HTMLCanvasElement;
+
 function rememberCacheValue<K, V>(cache: Map<K, V>, key: K, value: V, limit: number) {
   if (cache.has(key)) cache.delete(key);
   cache.set(key, value);
@@ -65,6 +67,14 @@ function limitedCanvasSize(width: number, height: number) {
     height: Math.max(1, Math.round(naturalHeight * scale)),
     scale
   };
+}
+
+function textureSourceWidth(image: TextureImageSource) {
+  return ("naturalWidth" in image ? image.naturalWidth || image.width : image.width) || 1;
+}
+
+function textureSourceHeight(image: TextureImageSource) {
+  return ("naturalHeight" in image ? image.naturalHeight || image.height : image.height) || 1;
 }
 
 function useLoadedImage(src: string, fallbackSrc = "") {
@@ -319,7 +329,7 @@ function createOutlineCanvas(source: CanvasImageSource, thickness = 2, color = "
   return canvas;
 }
 
-function getMirroredTexture(image: HTMLImageElement | HTMLCanvasElement, mirrorX: boolean, mirrorY: boolean) {
+function getMirroredTexture(image: TextureImageSource, mirrorX: boolean, mirrorY: boolean) {
   if (!mirrorX && !mirrorY) return image;
   const w = ("naturalWidth" in image ? image.naturalWidth || image.width : image.width) || 1;
   const h = ("naturalHeight" in image ? image.naturalHeight || image.height : image.height) || 1;
@@ -332,6 +342,113 @@ function getMirroredTexture(image: HTMLImageElement | HTMLCanvasElement, mirrorX
   ctx.scale(mirrorX ? -1 : 1, mirrorY ? -1 : 1);
   ctx.drawImage(image, 0, 0, w, h);
   return canvas;
+}
+
+function useLiveDesignCanvasImage(textureImage: TextureImageSource | null, designCanvas: DesignCanvas | null) {
+  const imageLayerImages = useDesignLayerImages(designCanvas);
+  return useMemo(() => {
+    if (!textureImage || !designCanvas) return null;
+    const width = Math.max(1, Math.round(designCanvas.width || ("naturalWidth" in textureImage ? textureImage.naturalWidth || textureImage.width : textureImage.width) || 1));
+    const height = Math.max(1, Math.round(designCanvas.height || ("naturalHeight" in textureImage ? textureImage.naturalHeight || textureImage.height : textureImage.height) || 1));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    drawDesignTextureBackground(context, textureImage, width, height, designCanvas);
+    for (const layer of designCanvas.layers || []) {
+      drawDesignLayer(context, layer, imageLayerImages[layer.id] || null);
+    }
+    return canvas;
+  }, [designCanvas, imageLayerImages, textureImage]);
+}
+
+function useDesignLayerImages(designCanvas: DesignCanvas | null) {
+  const imageLayers = useMemo(
+    () => (designCanvas?.layers || []).filter((layer) => layer.visible && layer.type === "image" && layer.source_url),
+    [designCanvas?.layers]
+  );
+  const [images, setImages] = useState<Record<string, HTMLImageElement | null>>({});
+
+  useEffect(() => {
+    let active = true;
+    if (imageLayers.length === 0) {
+      setImages({});
+      return;
+    }
+    Promise.all(imageLayers.map((layer) => loadCachedImage(layer.source_url || "").then((image) => [layer.id, image] as const))).then((entries) => {
+      if (!active) return;
+      setImages(Object.fromEntries(entries));
+    });
+    return () => {
+      active = false;
+    };
+  }, [imageLayers]);
+
+  return images;
+}
+
+function drawDesignTextureBackground(
+  context: CanvasRenderingContext2D,
+  image: TextureImageSource,
+  width: number,
+  height: number,
+  designCanvas: DesignCanvas
+) {
+  const tileSource = designCanvas.mirror && "naturalWidth" in image ? makeMirrorTileCanvas(image) : image;
+  const sourceWidth = ("naturalWidth" in tileSource ? tileSource.naturalWidth || tileSource.width : tileSource.width) || 1;
+  const sourceHeight = ("naturalHeight" in tileSource ? tileSource.naturalHeight || tileSource.height : tileSource.height) || 1;
+  const scale = Math.max(0.05, Number(designCanvas.texture_scale || 1));
+  const tileWidth = Math.max(1, Math.round(sourceWidth * scale));
+  const tileHeight = Math.max(1, Math.round(sourceHeight * scale));
+  const offsetX = Number(designCanvas.texture_offset_x || 0);
+  const offsetY = Number(designCanvas.texture_offset_y || 0);
+
+  if (designCanvas.tile === false) {
+    context.drawImage(tileSource, Math.round((width - tileWidth) / 2 + offsetX), Math.round((height - tileHeight) / 2 + offsetY), tileWidth, tileHeight);
+    return;
+  }
+
+  const startX = -tileWidth + positiveModulo(offsetX, tileWidth);
+  const startY = -tileHeight + positiveModulo(offsetY, tileHeight);
+  for (let y = startY; y < height + tileHeight; y += tileHeight) {
+    for (let x = startX; x < width + tileWidth; x += tileWidth) {
+      context.drawImage(tileSource, x, y, tileWidth, tileHeight);
+    }
+  }
+}
+
+function drawDesignLayer(context: CanvasRenderingContext2D, layer: DesignLayer, image: HTMLImageElement | null) {
+  if (!layer.visible) return;
+  context.save();
+  context.globalAlpha = Math.max(0, Math.min(1, Number(layer.opacity ?? 1)));
+  context.translate(layer.x, layer.y);
+  if (layer.rotation) {
+    context.translate(layer.width / 2, layer.height / 2);
+    context.rotate((layer.rotation * Math.PI) / 180);
+    context.translate(-layer.width / 2, -layer.height / 2);
+  }
+  if (layer.type === "image" && image) {
+    context.drawImage(image, 0, 0, layer.width, layer.height);
+  } else if (layer.type === "text" && layer.content) {
+    const fontSize = Math.max(8, Number(layer.font_size || 96));
+    context.font = `${layer.font_weight === "700" ? "700" : "400"} ${fontSize}px sans-serif`;
+    context.textBaseline = "top";
+    context.lineJoin = "round";
+    const lines = String(layer.content).split("\n");
+    const lineHeight = Math.max(fontSize, fontSize * 1.18);
+    lines.forEach((line, index) => {
+      const y = index * lineHeight;
+      if (layer.stroke && (layer.stroke_width || 0) > 0) {
+        context.strokeStyle = layer.stroke;
+        context.lineWidth = layer.stroke_width || 0;
+        context.strokeText(line, 0, y, layer.width);
+      }
+      context.fillStyle = layer.fill || "#111111";
+      context.fillText(line, 0, y, layer.width);
+    });
+  }
+  context.restore();
 }
 
 type Props = {
@@ -449,6 +566,8 @@ export function SinglePieceToolbar({
 
 export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, designCanvas, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece, onPatchTransform, onResetPiece, compact = false, pieceZoom = 1, dragSnapEnabled = true }: SinglePieceCalibrationProps) {
   const textureImage = useLoadedImage(textureUrl);
+  const designTextureImage = useLiveDesignCanvasImage(textureImage, designCanvas ?? null);
+  const previewTextureImage = designTextureImage || textureImage;
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
   const selectedMaskKey = selected?.mask_url || "";
@@ -497,20 +616,20 @@ export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, sh
           {!selected && <Text x={Math.max(24, stageWidth / 2 - 100)} y={stageHeight / 2 - 12} text="请先选择套装！" fill="#64748b" fontSize={18} />}
           {selected && !textureImage && <Text x={Math.max(24, stageWidth / 2 - 120)} y={stageHeight / 2 - 12} text="请上传图案或生成面料" fill="#64748b" fontSize={18} />}
         </Layer>
-        {textureImage && displayPiece && selectedMaskFrame && (
+        {previewTextureImage && displayPiece && selectedMaskFrame && (
           <DimmedTextureLayer
             piece={displayPiece}
-            textureImage={textureImage}
+            textureImage={previewTextureImage}
             frame={selectedMaskFrame}
             zoom={effectiveZoom}
             stageWidth={stageWidth}
             stageHeight={stageHeight}
           />
         )}
-        {textureImage && displayPiece && alphaMaskImage && selectedMaskFrame && (
+        {previewTextureImage && displayPiece && alphaMaskImage && selectedMaskFrame && (
           <ClippedTextureLayer
             piece={displayPiece}
-            textureImage={textureImage}
+            textureImage={previewTextureImage}
             maskImage={alphaMaskImage}
             frame={selectedMaskFrame}
             zoom={effectiveZoom}
@@ -1126,9 +1245,9 @@ function DesignTextureBackground({
   );
 }
 
-function makeMirrorTileCanvas(image: HTMLImageElement) {
-  const sourceWidth = image.naturalWidth || image.width;
-  const sourceHeight = image.naturalHeight || image.height;
+function makeMirrorTileCanvas(image: TextureImageSource) {
+  const sourceWidth = textureSourceWidth(image);
+  const sourceHeight = textureSourceHeight(image);
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, sourceWidth * 2);
   canvas.height = Math.max(1, sourceHeight * 2);
@@ -1596,7 +1715,7 @@ function DimmedTextureLayer({
   stageHeight
 }: {
   piece: Piece;
-  textureImage: HTMLImageElement;
+  textureImage: TextureImageSource;
   frame: { x: number; y: number; width: number; height: number };
   zoom?: number;
   stageWidth: number;
@@ -1688,7 +1807,7 @@ function ClippedTextureLayer({
   contentPiece?: Piece;
   contentMirrorX?: boolean;
   contentMirrorY?: boolean;
-  textureImage: HTMLImageElement;
+  textureImage: TextureImageSource;
   maskImage: CanvasImageSource;
   frame: { x: number; y: number; width: number; height: number };
   zoom?: number;
@@ -1736,8 +1855,8 @@ function ClippedTextureLayer({
     mirrorY: effectiveMirrorY
   });
   const renderedImage = globalMode ? globalSample || textureImage : textureImage;
-  const imageWidth = globalMode ? frame.width : Math.max(1, textureImage.naturalWidth * renderPiece.transform.scale * frameScale);
-  const imageHeight = globalMode ? frame.height : Math.max(1, textureImage.naturalHeight * renderPiece.transform.scale * frameScale);
+  const imageWidth = globalMode ? frame.width : Math.max(1, textureSourceWidth(textureImage) * renderPiece.transform.scale * frameScale);
+  const imageHeight = globalMode ? frame.height : Math.max(1, textureSourceHeight(textureImage) * renderPiece.transform.scale * frameScale);
   const imageCenterX = frame.x + frame.width / 2 + (globalMode ? 0 : renderPiece.transform.offset_x * frameScale);
   const imageCenterY = frame.y + frame.height / 2 + (globalMode ? 0 : renderPiece.transform.offset_y * frameScale);
   const dragOffsetFromNode = (x: number, y: number) => {
@@ -1855,13 +1974,13 @@ function wrapCropCoordinate(value: number, size: number) {
 }
 
 function useTiledTextureSample(
-  textureImage: HTMLImageElement,
+  textureImage: TextureImageSource,
   crop: { x: number; y: number; width: number; height: number } | null
 ) {
   return useMemo(() => {
     if (!crop) return null;
-    const sourceWidth = textureImage.naturalWidth || textureImage.width;
-    const sourceHeight = textureImage.naturalHeight || textureImage.height;
+    const sourceWidth = textureSourceWidth(textureImage);
+    const sourceHeight = textureSourceHeight(textureImage);
     if (sourceWidth <= 0 || sourceHeight <= 0) return null;
     const width = Math.max(1, Math.round(crop.width));
     const height = Math.max(1, Math.round(crop.height));
@@ -1895,11 +2014,11 @@ type GlobalCanvasSampleOptions = {
   mirrorY?: boolean;
 };
 
-function useGlobalCanvasSample(textureImage: HTMLImageElement, options: GlobalCanvasSampleOptions) {
+function useGlobalCanvasSample(textureImage: TextureImageSource, options: GlobalCanvasSampleOptions) {
   return useMemo(() => {
     if (!options.view) return null;
-    const sourceWidth = textureImage.naturalWidth || textureImage.width;
-    const sourceHeight = textureImage.naturalHeight || textureImage.height;
+    const sourceWidth = textureSourceWidth(textureImage);
+    const sourceHeight = textureSourceHeight(textureImage);
     if (sourceWidth <= 0 || sourceHeight <= 0) return null;
 
     const view = options.view;
@@ -1980,11 +2099,11 @@ function useGlobalCanvasSample(textureImage: HTMLImageElement, options: GlobalCa
 }
 
 function createTiledTextureSample(
-  textureImage: HTMLImageElement,
+  textureImage: TextureImageSource,
   crop: { x: number; y: number; width: number; height: number }
 ) {
-  const sourceWidth = textureImage.naturalWidth || textureImage.width;
-  const sourceHeight = textureImage.naturalHeight || textureImage.height;
+  const sourceWidth = textureSourceWidth(textureImage);
+  const sourceHeight = textureSourceHeight(textureImage);
   if (sourceWidth <= 0 || sourceHeight <= 0) return null;
   const width = Math.max(1, Math.round(crop.width));
   const height = Math.max(1, Math.round(crop.height));

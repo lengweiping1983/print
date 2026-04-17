@@ -646,7 +646,15 @@ export function StudioPage() {
 
   async function patchLayer(layerId: string, update: Partial<DesignLayer>) {
     if (!designCanvas) return;
-    const next = { ...designCanvas, layers: designLayers.map((layer) => (layer.id === layerId ? { ...layer, ...update } : layer)) };
+    const next = {
+      ...designCanvas,
+      layers: designLayers.map((layer) => {
+        if (layer.id !== layerId) return layer;
+        const patched = { ...layer, ...update };
+        const targetRole = update.target_roles?.[0] || "";
+        return targetRole ? positionLayerInTargetPiece(patched, targetRole, pieces) : patched;
+      })
+    };
     await saveDesignCanvas(next);
   }
 
@@ -1174,14 +1182,14 @@ export function StudioPage() {
                       className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line"
                       onClick={() => setShowLayerPicker(true)}
                     >
-                      选择图片层
+                      选择图片
                     </button>
                   </div>
                 )}
                 <AssetPickerPopover
                   open={showLayerPicker}
                   onClose={() => setShowLayerPicker(false)}
-                  title="选择图片层"
+                  title="选择图片"
                 >
                   <div className="flex flex-wrap gap-2">
                     {designLayers.filter((l) => l.type === "image").map((layer) => (
@@ -1307,7 +1315,7 @@ export function StudioPage() {
               compact
               pieces={pieces}
               selectedPieceId={selectedPieceId}
-              textureUrl={workspaceTextureUrl}
+              textureUrl={selectedInputTextureUrl || workspaceTextureUrl}
               showOutlines={showOutlines}
               outlineWidth={outlineWidth}
               designCanvas={designCanvas}
@@ -1588,6 +1596,27 @@ function extractPieceDefaults(pieces: Piece[]): Record<string, PieceTransform> {
     acc[piece.id] = { ...piece.transform };
     return acc;
   }, {});
+}
+
+function positionLayerInTargetPiece(layer: DesignLayer, targetRole: string, pieces: Piece[]): DesignLayer {
+  const piece = pieces.find((item) => !item.mirror_of && item.transform.piece_role === targetRole);
+  if (!piece) return layer;
+  const pieceX = Number(piece.transform.design_x ?? piece.source_x) + Number(piece.transform.offset_x || 0);
+  const pieceY = Number(piece.transform.design_y ?? piece.source_y) + Number(piece.transform.offset_y || 0);
+  const safeZone = piece.transform.safe_zones?.[0];
+  const target = safeZone
+    ? {
+        x: pieceX + Number(safeZone.x || 0),
+        y: pieceY + Number(safeZone.y || 0),
+        width: Number(safeZone.width || piece.width),
+        height: Number(safeZone.height || piece.height)
+      }
+    : { x: pieceX, y: pieceY, width: piece.width, height: piece.height };
+  return {
+    ...layer,
+    x: Math.round(target.x + target.width / 2 - layer.width / 2),
+    y: Math.round(target.y + target.height / 2 - layer.height / 2)
+  };
 }
 
 function createLayer(type: "image" | "text", designCanvas: DesignCanvas, asset?: Asset): DesignLayer {
