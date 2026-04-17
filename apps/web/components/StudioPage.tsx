@@ -1173,13 +1173,22 @@ export function StudioPage() {
               title="图层"
               action={
                 <div className="flex gap-2">
-                  <button type="button" className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold text-ink ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
+                  {designLayers.filter((l) => l.type === "image").length > 0 && (
+                    <button
+                      type="button"
+                      className="whitespace-nowrap rounded-md bg-white px-2 py-1.5 text-xs font-semibold text-ink ring-1 ring-line"
+                      onClick={() => setShowLayerPicker(true)}
+                    >
+                      选择图片
+                    </button>
+                  )}
+                  <button type="button" className="whitespace-nowrap rounded-md bg-white px-2 py-1.5 text-xs font-semibold text-ink ring-1 ring-line disabled:opacity-50" disabled={!canUseLayers} onClick={addTextLayer}>
                     添加文字
                   </button>
-                  <button type="button" className="rounded-md bg-ink px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => layerImageInputRef.current?.click()}>
+                  <button type="button" className="whitespace-nowrap rounded-md bg-ink px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => layerImageInputRef.current?.click()}>
                     上传图片
                   </button>
-                  <button type="button" className="rounded-md bg-action px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => { setAiDialogMode("layer"); setShowAiTextureDialog(true); }}>
+                  <button type="button" className="whitespace-nowrap rounded-md bg-action px-2 py-1.5 text-xs font-semibold text-white disabled:opacity-50" disabled={!canUseLayers} onClick={() => { setAiDialogMode("layer"); setShowAiTextureDialog(true); }}>
                     AI 生图
                   </button>
                 </div>
@@ -1201,20 +1210,6 @@ export function StudioPage() {
                   <p className="m-0 text-xs leading-5 text-slate-500">
                     先完成“自动适配面料”，生成全局设计画布后，可添加 logo、主图或号码文字。
                   </p>
-                )}
-                {designLayers.filter((l) => l.type === "image").length > 0 && (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-slate-500">
-                      已选图片层：{selectedLayer?.type === "image" ? selectedLayer.name : "无"}
-                    </span>
-                    <button
-                      type="button"
-                      className="rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line"
-                      onClick={() => setShowLayerPicker(true)}
-                    >
-                      选择图片
-                    </button>
-                  </div>
                 )}
                 <AssetPickerPopover
                   open={showLayerPicker}
