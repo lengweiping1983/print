@@ -388,6 +388,19 @@ function useDesignLayerImages(designCanvas: DesignCanvas | null) {
   return images;
 }
 
+function shouldUseLiveDesignCanvas(designCanvas: DesignCanvas | null | undefined, pieces: Piece[]) {
+  if (!designCanvas) return false;
+  const hasLayers = (designCanvas.layers || []).some((layer) => layer.visible !== false);
+  const hasGlobalPieces = pieces.some((piece) => !piece.mirror_of && piece.transform.mode === "global_canvas" && piece.transform.global_enabled !== false);
+  return hasLayers || hasGlobalPieces;
+}
+
+function useWorkspacePreviewTexture(textureImage: TextureImageSource | null, designCanvas: DesignCanvas | null | undefined, pieces: Piece[]) {
+  const liveDesignCanvas = shouldUseLiveDesignCanvas(designCanvas, pieces) ? designCanvas || null : null;
+  const designTextureImage = useLiveDesignCanvasImage(textureImage, liveDesignCanvas);
+  return designTextureImage || textureImage;
+}
+
 function drawDesignTextureBackground(
   context: CanvasRenderingContext2D,
   image: TextureImageSource,
@@ -566,8 +579,7 @@ export function SinglePieceToolbar({
 
 export function SinglePieceCalibration({ pieces, selectedPieceId, textureUrl, showOutlines, outlineWidth = 1, designCanvas, onToggleOutlines, onOutlineWidthChange = () => {}, onMovePiece, onPatchTransform, onResetPiece, compact = false, pieceZoom = 1, dragSnapEnabled = true }: SinglePieceCalibrationProps) {
   const textureImage = useLoadedImage(textureUrl);
-  const designTextureImage = useLiveDesignCanvasImage(textureImage, designCanvas ?? null);
-  const previewTextureImage = designTextureImage || textureImage;
+  const previewTextureImage = useWorkspacePreviewTexture(textureImage, designCanvas, pieces);
   const selected = pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0];
   const maskImage = useLoadedImage(selected?.mask_url || "");
   const selectedMaskKey = selected?.mask_url || "";
@@ -791,8 +803,6 @@ type LayoutPreviewProps = {
   pieces: Piece[];
   selectedPieceId: string;
   textureUrl: string;
-  fallbackTextureUrl?: string;
-  textureIsDesignCanvas?: boolean;
   designCanvas?: DesignCanvas | null;
   selectedLayerId?: string;
   showOutlines: boolean;
@@ -820,8 +830,6 @@ export function LayoutPreview({
   pieces,
   selectedPieceId,
   textureUrl,
-  fallbackTextureUrl = "",
-  textureIsDesignCanvas = false,
   designCanvas,
   selectedLayerId = "",
   showOutlines,
@@ -844,7 +852,8 @@ export function LayoutPreview({
   locked = false,
   onToggleLocked = () => {}
 }: LayoutPreviewProps) {
-  const textureImage = useLoadedImage(textureUrl, fallbackTextureUrl);
+  const textureImage = useLoadedImage(textureUrl);
+  const previewTextureImage = useWorkspacePreviewTexture(textureImage, designCanvas, pieces);
   const [layoutZoom, setLayoutZoom] = useState(0.25);
   const [designZoom, setDesignZoom] = useState(0.25);
   const [previewMode, setPreviewMode] = useState<"layout" | "design">("layout");
@@ -939,19 +948,33 @@ export function LayoutPreview({
             <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
               <Rect x={0} y={0} width={layoutBounds.width} height={layoutBounds.height} fill="#ffffff" />
             </Layer>
-            {textureImage &&
+            {previewTextureImage &&
               pieces.map((piece) => (
                 <LayoutPieceTexture
                   key={`texture-${piece.id}`}
                   piece={piece}
                   sourcePiece={piece.mirror_of ? pieces.find((item) => item.id === piece.mirror_of) : undefined}
-                  textureImage={textureImage}
+                  textureImage={previewTextureImage}
                   selected={piece.id === selectedPieceId}
                   zoom={layoutZoom}
                   onSelect={() => onSelectPiece(piece.id)}
                 />
               ))}
-            {/* 排版视图下只显示裁片图片，不显示线框 */}
+            {selectedPieceId && (
+              <Layer scaleX={layoutZoom} scaleY={layoutZoom}>
+                {pieces
+                  .filter((piece) => piece.id === selectedPieceId)
+                  .map((piece) => (
+                    <PieceOutline
+                      key={`selected-outline-${piece.id}`}
+                      piece={piece}
+                      selected
+                      outlineWidth={Math.max(2, outlineWidth)}
+                      onSelect={() => onSelectPiece(piece.id)}
+                    />
+                  ))}
+              </Layer>
+            )}
           </Stage>
         </div>
         <div className={previewMode === "design" ? "block shrink-0" : "hidden shrink-0"}>
@@ -964,7 +987,7 @@ export function LayoutPreview({
                   width={designBounds.width}
                   height={designBounds.height}
                   designCanvas={designCanvas || null}
-                  directImage={textureIsDesignCanvas}
+                  directImage={false}
                 />
               )}
             </Layer>
@@ -2134,7 +2157,7 @@ function LayoutPieceTexture({
 }: {
   piece: Piece;
   sourcePiece?: Piece;
-  textureImage: HTMLImageElement;
+  textureImage: TextureImageSource;
   selected: boolean;
   zoom: number;
   onSelect: () => void;

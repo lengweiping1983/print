@@ -248,6 +248,8 @@ export function StudioPage() {
   const [texturePrompts, setTexturePrompts] = useState<FabricPrompt[]>([]);
   const [layerPrompts, setLayerPrompts] = useState<FabricPrompt[]>([]);
   const [displayProgress, setDisplayProgress] = useState(0);
+  const progressTickRef = useRef(0);
+  const jobProgressRef = useRef(0);
   const [showPromptMenu, setShowPromptMenu] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [aiResolution, setAiResolution] = useState<"1K" | "2K" | "4K">("2K");
@@ -353,7 +355,7 @@ export function StudioPage() {
     if (job.status === "queued") {
       setNotice(`${typeLabel}排队中…`);
     } else if (job.status === "succeeded") {
-      setNotice(`${typeLabel}已完成`);
+      setNotice(`${typeLabel}成功`);
     } else if (job.status === "failed") {
       setNotice(`${typeLabel}失败`);
     }
@@ -364,19 +366,47 @@ export function StudioPage() {
       const typeLabel = (job.job_type && JOB_TYPE_LABELS[job.job_type]) || job.job_type || "任务";
       setNotice(`${typeLabel}进行中… ${Math.round(displayProgress * 100)}%`);
     }
-  }, [job, displayProgress]);
+  }, [job?.id, job?.status, job?.job_type, displayProgress]);
+
+  const PROGRESS_SIMULATION: Record<string, { step: number; interval: number; slowdownAt?: number; slowdownStep?: number; slowdownInterval?: number; cap: number }> = {
+    texture_generate: { step: 0.01, interval: 1000, slowdownAt: 0.80, slowdownStep: 0.01, slowdownInterval: 3000, cap: 0.95 },
+    texture_seamless: { step: 0.10, interval: 1000, cap: 0.95 },
+    render_preview: { step: 0.05, interval: 1000, cap: 0.95 },
+    export_render: { step: 0.05, interval: 1000, cap: 0.95 },
+    fit_global_texture: { step: 0.05, interval: 1000, cap: 0.95 },
+    texture_fit_global: { step: 0.05, interval: 1000, cap: 0.95 },
+  };
 
   useEffect(() => {
-    if (job?.status === "running") {
-      setDisplayProgress((p) => Math.max(p, job.progress));
-      const timer = setInterval(() => {
-        setDisplayProgress((p) => Math.min(0.95, p + 0.05));
-      }, 10000);
-      return () => clearInterval(timer);
-    } else {
+    jobProgressRef.current = job?.progress ?? 0;
+  }, [job?.progress]);
+
+  useEffect(() => {
+    progressTickRef.current = 0;
+    if (!job || job.status !== "running") {
       setDisplayProgress(job?.progress ?? 0);
+      return;
     }
-  }, [job]);
+    const cfg = PROGRESS_SIMULATION[job.job_type || ""];
+    if (!cfg) {
+      setDisplayProgress(Math.min(jobProgressRef.current, 0.95));
+      return;
+    }
+    setDisplayProgress(Math.min(jobProgressRef.current, cfg.cap));
+    const timer = setInterval(() => {
+      setDisplayProgress((p) => {
+        const base = Math.max(p, Math.min(jobProgressRef.current, cfg.cap));
+        if (base >= cfg.cap) return base;
+        if (cfg.slowdownAt !== undefined && base >= cfg.slowdownAt) {
+          progressTickRef.current += 1;
+          const freq = Math.max(1, Math.round((cfg.slowdownInterval ?? cfg.interval) / cfg.interval));
+          if (progressTickRef.current % freq !== 0) return base;
+        }
+        return Math.min(base + cfg.step, cfg.cap);
+      });
+    }, cfg.interval);
+    return () => clearInterval(timer);
+  }, [job?.id, job?.status, job?.job_type]);
 
   const selectedPiece = useMemo(
     () => pieces.find((piece) => piece.id === selectedPieceId) ?? pieces[0] ?? null,
@@ -395,9 +425,9 @@ export function StudioPage() {
       ? activeTexture.seamless_url
       : activeTexture.source_url
     : "";
-  const workspaceTextureUrl = activeTexture?.design_canvas_url || selectedInputTextureUrl;
+  const workspaceTextureUrl = selectedInputTextureUrl;
   const recommendationLabel = activeTexture?.fit_source_recommendation === "seamless" ? "使用无缝图适配" : "使用原图适配";
-  const canUseLayers = Boolean(designCanvas && activeTexture?.design_canvas_url);
+  const canUseLayers = Boolean(designCanvas && activeTexture);
   const primaryPieceCount = pieces.filter((piece) => !piece.mirror_of).length;
   const linkedPieceCount = pieces.length - primaryPieceCount;
   const globalPieceCount = pieces.filter((piece) => !piece.mirror_of && piece.transform.mode === "global_canvas" && piece.transform.global_enabled !== false).length;
@@ -1340,7 +1370,7 @@ export function StudioPage() {
               compact
               pieces={pieces}
               selectedPieceId={selectedPieceId}
-              textureUrl={selectedInputTextureUrl || workspaceTextureUrl}
+              textureUrl={workspaceTextureUrl}
               showOutlines={showOutlines}
               outlineWidth={outlineWidth}
               designCanvas={designCanvas}
@@ -1362,8 +1392,6 @@ export function StudioPage() {
           pieces={pieces}
           selectedPieceId={selectedPieceId}
           textureUrl={workspaceTextureUrl}
-          fallbackTextureUrl={selectedInputTextureUrl}
-          textureIsDesignCanvas={Boolean(activeTexture?.design_canvas_url)}
           designCanvas={designCanvas}
           selectedLayerId={selectedLayerId}
           showOutlines={showOutlines}
