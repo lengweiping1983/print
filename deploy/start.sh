@@ -9,8 +9,13 @@ echo "========================================"
 echo "  Print Studio 最简启动脚本"
 echo "========================================"
 
-# 1. 加载环境变量
-if [ -f "$PROJECT_DIR/.env" ]; then
+# 1. 加载环境变量（按 ENV 变量选择配置文件，默认 test）
+ENV_NAME="${ENV:-test}"
+ENV_FILE="$PROJECT_DIR/.env.$ENV_NAME"
+if [ -f "$ENV_FILE" ]; then
+    echo "加载环境变量: $ENV_FILE (ENV=$ENV_NAME)"
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
+elif [ -f "$PROJECT_DIR/.env" ]; then
     echo "加载环境变量: $PROJECT_DIR/.env"
     export $(grep -v '^#' "$PROJECT_DIR/.env" | xargs)
 elif [ -f "$API_DIR/.env" ]; then

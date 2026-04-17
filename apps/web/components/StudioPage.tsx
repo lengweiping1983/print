@@ -843,7 +843,15 @@ export function StudioPage() {
     <main className="min-h-screen bg-mist p-4 text-ink">
       <header className="mb-4 grid grid-cols-[1fr_auto] items-center gap-4 rounded-lg border border-line bg-white px-5 py-4 shadow-panel max-[980px]:grid-cols-1">
         <div>
-          <h1 className="m-0 text-3xl font-bold">服装裁片</h1>
+          <h1 className="m-0 flex items-center gap-3 text-3xl font-bold">
+            服装裁片
+            {process.env.NEXT_PUBLIC_ENV === "test" && (
+              <span className="rounded-md bg-amber-400 px-2 py-0.5 text-sm font-semibold text-white">测试环境</span>
+            )}
+            {process.env.NEXT_PUBLIC_ENV === "production" && (
+              <span className="rounded-md bg-emerald-500 px-2 py-0.5 text-sm font-semibold text-white">正式环境</span>
+            )}
+          </h1>
           <p className="m-0 mt-2 text-sm text-slate-500">{notice}</p>
         </div>
         <div className="flex flex-wrap gap-2">

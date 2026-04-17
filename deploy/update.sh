@@ -13,7 +13,7 @@ cd "$PROJECT_DIR"
 
 # 1. 拉取最新代码
 echo "[1/5] 拉取最新代码..."
-git pull
+git pull --rebase
 
 # 2. 更新依赖
 echo "[2/5] 更新 Python 依赖..."

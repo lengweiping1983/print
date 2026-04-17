@@ -78,6 +78,8 @@ async def lifespan(_: FastAPI):
     yield
 
 
+import os
+
 app = FastAPI(title="Print Studio API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
@@ -85,6 +87,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/env")
+def api_env() -> dict:
+    return {
+        "env": os.environ.get("ENV", "unknown"),
+        "is_test": os.environ.get("ENV", "") == "test",
+        "is_production": os.environ.get("ENV", "") == "production",
+    }
 
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
