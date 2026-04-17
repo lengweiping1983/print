@@ -3,7 +3,6 @@
 import type { DesignCanvas, DesignLayer, Job, Piece, SafetyReportItem, Texture } from "@print-studio/shared-types";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { PIECE_ROLE_LABELS } from "@/lib/labels";
 
 export function ToastNotice({ notice, job }: { notice: string; job: Job | null }) {
   const [visible, setVisible] = useState(false);
@@ -72,7 +71,7 @@ export function LayerEditor({
   onChange: (update: Partial<DesignLayer>) => void;
   onDelete: () => void;
 }) {
-  const roles = Array.from(new Set(pieces.map((piece) => piece.transform.piece_role).filter(Boolean))) as string[];
+  const targetPieces = pieces.filter((piece) => !piece.mirror_of);
   const canvasW = designCanvas?.width ?? 2400;
   const canvasH = designCanvas?.height ?? 1600;
   const locked = layer.locked;
@@ -111,16 +110,16 @@ export function LayerEditor({
         </div>
       )}
       <label className="grid gap-1 text-sm font-semibold">
-        <span>目标部位</span>
+        <span>目标裁片</span>
         <select
           className="rounded-lg border border-line bg-white px-3 py-2 disabled:opacity-50"
-          value={layer.target_roles[0] || ""}
+          value={layer.target_piece_ids?.[0] || ""}
           disabled={locked}
-          onChange={(event) => onChange({ target_roles: event.target.value ? [event.target.value] : [] })}
+          onChange={(event) => onChange({ target_piece_ids: event.target.value ? [event.target.value] : [] })}
         >
           <option value="">自动匹配</option>
-          {roles.map((role) => (
-            <option key={role} value={role}>{PIECE_ROLE_LABELS[role] || role}</option>
+          {targetPieces.map((piece) => (
+            <option key={piece.id} value={piece.id}>{piece.name}</option>
           ))}
         </select>
       </label>

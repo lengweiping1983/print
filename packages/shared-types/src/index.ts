@@ -77,7 +77,7 @@ export type DesignLayer = {
   height: number;
   rotation: number;
   opacity: number;
-  target_roles: string[];
+  target_piece_ids: string[];
   asset_id?: string;
   source_url?: string;
   content?: string;

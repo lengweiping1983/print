@@ -70,11 +70,11 @@ def build_safety_report(pieces: list[dict[str, Any]], design_canvas: dict[str, A
     ]
     for layer in layers:
         rect = _layer_rect(layer)
-        target_roles = {str(role) for role in layer.get("target_roles", []) if role}
+        target_piece_ids = {str(piece_id) for piece_id in layer.get("target_piece_ids", []) if piece_id}
         candidates = [
             piece
             for piece in global_pieces
-            if _piece_matches_layer(piece, rect, target_roles)
+            if _piece_matches_layer(piece, rect, target_piece_ids)
         ]
         if not candidates:
             report.append(_report_item(layer, "warning", "图层没有落在任何全局裁片取样区域内。"))
@@ -227,9 +227,8 @@ def _piece_design_rect(piece: dict[str, Any]) -> dict[str, float]:
     }
 
 
-def _piece_matches_layer(piece: dict[str, Any], rect: dict[str, float], target_roles: set[str]) -> bool:
-    transform = piece.get("transform", {})
-    if target_roles and str(transform.get("piece_role") or "") not in target_roles:
+def _piece_matches_layer(piece: dict[str, Any], rect: dict[str, float], target_piece_ids: set[str]) -> bool:
+    if target_piece_ids and str(piece.get("id") or "") not in target_piece_ids:
         return False
     return _rects_intersect(rect, _piece_design_rect(piece))
 

@@ -150,6 +150,13 @@ sudo systemctl start print-api
 sudo systemctl status print-api
 ```
 
+### 4. 初始化数据说明
+后端在**首次启动**时会自动执行 `init_db()`，完成以下初始化：
+- 创建 SQLite 数据库表结构（`storage/print_studio.sqlite3`）
+- 自动导入 **20 条默认面料/Logo 提示词**（10 条面料纹理 + 10 条 Logo 标识）
+
+> 这些数据来源于 `apps/api/app/init_data/fabric_prompts.json`，通过 `INSERT ... ON CONFLICT(id) DO UPDATE` 写入数据库：新增记录会自动插入，已有记录会自动同步最新内容，已存在时不会重复插入。升级时无需额外操作。
+
 ---
 
 ## 七、部署前端（Next.js）

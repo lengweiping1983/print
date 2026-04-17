@@ -651,8 +651,8 @@ export function StudioPage() {
       layers: designLayers.map((layer) => {
         if (layer.id !== layerId) return layer;
         const patched = { ...layer, ...update };
-        const targetRole = update.target_roles?.[0] || "";
-        return targetRole ? positionLayerInTargetPiece(patched, targetRole, pieces) : patched;
+        const targetPieceId = update.target_piece_ids?.[0] || "";
+        return targetPieceId ? positionLayerInTargetPiece(patched, targetPieceId, pieces) : patched;
       })
     };
     await saveDesignCanvas(next);
@@ -1598,8 +1598,8 @@ function extractPieceDefaults(pieces: Piece[]): Record<string, PieceTransform> {
   }, {});
 }
 
-function positionLayerInTargetPiece(layer: DesignLayer, targetRole: string, pieces: Piece[]): DesignLayer {
-  const piece = pieces.find((item) => !item.mirror_of && item.transform.piece_role === targetRole);
+function positionLayerInTargetPiece(layer: DesignLayer, targetPieceId: string, pieces: Piece[]): DesignLayer {
+  const piece = pieces.find((item) => !item.mirror_of && item.id === targetPieceId);
   if (!piece) return layer;
   const pieceX = Number(piece.transform.design_x ?? piece.source_x) + Number(piece.transform.offset_x || 0);
   const pieceY = Number(piece.transform.design_y ?? piece.source_y) + Number(piece.transform.offset_y || 0);
@@ -1638,7 +1638,7 @@ function createLayer(type: "image" | "text", designCanvas: DesignCanvas, asset?:
       height,
       rotation: 0,
       opacity: 1,
-      target_roles: [],
+      target_piece_ids: [],
       asset_id: asset?.id || "",
       source_url: asset?.url || ""
     };
@@ -1656,7 +1656,7 @@ function createLayer(type: "image" | "text", designCanvas: DesignCanvas, asset?:
     height: 160,
     rotation: 0,
     opacity: 1,
-    target_roles: [],
+    target_piece_ids: [],
     content: "",
     font_size: 120,
     font_weight: "700",

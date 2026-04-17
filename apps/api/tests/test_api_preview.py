@@ -439,7 +439,6 @@ def test_design_canvas_layers_safety_and_export_manifest() -> None:
         saved_piece = client.patch(f"/api/projects/{project['id']}/pieces/{piece['id']}", json=transform).json()
         dx = saved_piece["transform"]["design_x"]
         dy = saved_piece["transform"]["design_y"]
-        role = saved_piece["transform"]["piece_role"]
         layers = [
             {
                 "id": "layer_ok",
@@ -454,7 +453,7 @@ def test_design_canvas_layers_safety_and_export_manifest() -> None:
                 "height": 20,
                 "rotation": 0,
                 "opacity": 1,
-                "target_roles": [role],
+                "target_piece_ids": [saved_piece["id"]],
                 "asset_id": logo_asset["id"],
                 "source_url": logo_asset["url"],
             },
@@ -471,7 +470,7 @@ def test_design_canvas_layers_safety_and_export_manifest() -> None:
                 "height": 40,
                 "rotation": 0,
                 "opacity": 1,
-                "target_roles": [role],
+                "target_piece_ids": [saved_piece["id"]],
                 "content": "23",
                 "font_size": 28,
                 "font_weight": "700",
