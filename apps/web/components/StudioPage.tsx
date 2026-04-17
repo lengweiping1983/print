@@ -294,9 +294,22 @@ export function StudioPage() {
         setDesignCanvas(readDesignCanvas(restored.project));
         setPieces(restored.pieces);
         setPieceDefaults(extractPieceDefaults(restored.pieces));
-        setGlobalFitDefaults({ texture_scale: 1, texture_angle: 0, texture_offset_x: 0, texture_offset_y: 0 });
+        const ui = (restored.project.export_config as any)?.ui_state || {};
+        setSelectedSetId(restored.project.template_set_id || "");
+        setSelectedPieceId(ui.selected_piece_id || restored.pieces[0]?.id || "");
+        setGlobalTextureScale(ui.global_texture_scale ?? 1);
+        setTextureAngle(ui.texture_angle ?? 0);
+        setGlobalOffsetX(ui.global_offset_x ?? 0);
+        setGlobalOffsetY(ui.global_offset_y ?? 0);
+        setGlobalSymmetry(ui.global_symmetry || "continuous");
+        setGlobalAnchor(ui.global_anchor || "front_center");
+        setGlobalFitDefaults({
+          texture_scale: ui.global_texture_scale ?? 1,
+          texture_angle: ui.texture_angle ?? 0,
+          texture_offset_x: ui.global_offset_x ?? 0,
+          texture_offset_y: ui.global_offset_y ?? 0,
+        });
         setTextures(restored.textures);
-        setSelectedPieceId(restored.pieces[0]?.id ?? "");
         setTemplateSets(availableSets);
         localStorage.setItem(LAST_PROJECT_KEY, restored.project.id);
         setNotice(restored.created ? "项目已创建，请在左侧选择模板开始打样。" : "已恢复最近的裁片项目。");
@@ -311,6 +324,20 @@ export function StudioPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!project) return;
+    const payload = {
+      selected_piece_id: selectedPieceId,
+      global_texture_scale: globalTextureScale,
+      texture_angle: textureAngle,
+      global_offset_x: globalOffsetX,
+      global_offset_y: globalOffsetY,
+      global_symmetry: globalSymmetry,
+      global_anchor: globalAnchor,
+    };
+    void api.patchProjectUIState(project.id, payload);
+  }, [project?.id, selectedPieceId, globalTextureScale, textureAngle, globalOffsetX, globalOffsetY, globalSymmetry, globalAnchor]);
 
   useEffect(() => {
     if (!job) {

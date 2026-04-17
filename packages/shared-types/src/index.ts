@@ -2,6 +2,7 @@ export type Project = {
   id: string;
   name: string;
   size_name: string;
+  template_set_id?: string;
   dpi: number;
   unit: string;
   canvas_width: number;

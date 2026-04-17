@@ -53,6 +53,7 @@ from .schemas import (
     ProjectCreate,
     ProjectFromTemplateRequest,
     ProjectOut,
+    ProjectUIStatePatch,
     SeamlessRequest,
     SetPieceDefOut,
     SetPieceDefPatch,
@@ -1013,13 +1014,14 @@ def create_project_from_template_set(payload: ProjectFromTemplateRequest) -> dic
         export_config = {"design_canvas": design_canvas}
         con.execute(
             """
-            insert into projects(id, name, size_name, dpi, unit, canvas_width, canvas_height, export_config, created_at, updated_at)
-            values (?, ?, ?, ?, 'px', 0, 0, ?, ?, ?)
+            insert into projects(id, name, size_name, template_set_id, dpi, unit, canvas_width, canvas_height, export_config, created_at, updated_at)
+            values (?, ?, ?, ?, ?, 'px', 0, 0, ?, ?, ?)
             """,
             (
                 project_id,
                 f"{set_data['name']}-{size_data['size_name']}",
                 size_data["size_name"],
+                payload.set_id,
                 DEFAULT_DPI,
                 dumps(export_config),
                 created,
@@ -1633,6 +1635,28 @@ def get_project_dict(project_id: str) -> dict:
 def _project_out(data: dict) -> dict:
     data["export_config"] = loads(data["export_config"], {})
     return data
+
+
+@app.patch("/api/projects/{project_id}/ui-state", response_model=ProjectOut)
+def patch_project_ui_state(project_id: str, payload: ProjectUIStatePatch) -> dict:
+    ensure_project(project_id)
+    project = get_project_dict(project_id)
+    export_config = dict(project.get("export_config") or {})
+    export_config["ui_state"] = {
+        "selected_piece_id": payload.selected_piece_id,
+        "global_texture_scale": payload.global_texture_scale,
+        "texture_angle": payload.texture_angle,
+        "global_offset_x": payload.global_offset_x,
+        "global_offset_y": payload.global_offset_y,
+        "global_symmetry": payload.global_symmetry,
+        "global_anchor": payload.global_anchor,
+    }
+    with connect() as con:
+        con.execute(
+            "update projects set export_config = ?, updated_at = ? where id = ?",
+            (dumps(export_config), now_iso(), project_id),
+        )
+    return get_project_dict(project_id)
 
 
 def update_project_design_canvas(project_id: str, design_canvas: dict) -> None:

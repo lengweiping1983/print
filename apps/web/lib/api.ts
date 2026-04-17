@@ -25,6 +25,21 @@ export const api = {
   getProject(projectId: string) {
     return request<Project>(`/api/projects/${projectId}`);
   },
+  patchProjectUIState(projectId: string, payload: {
+    selected_piece_id: string;
+    global_texture_scale: number;
+    texture_angle: number;
+    global_offset_x: number;
+    global_offset_y: number;
+    global_symmetry: string;
+    global_anchor: string;
+  }) {
+    return request<Project>(`/api/projects/${projectId}/ui-state`, {
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    });
+  },
   uploadAsset(projectId: string, kind: string, file: File) {
     const form = new FormData();
     form.set("kind", kind);

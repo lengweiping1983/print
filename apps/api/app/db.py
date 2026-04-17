@@ -218,6 +218,7 @@ def ensure_schema() -> None:
         try:
             con.executescript(SCHEMA_SQL)
             ensure_system_project(con)
+            ensure_projects_template_set_id_column(con)
             ensure_texture_columns(con)
             ensure_template_set_columns(con)
             ensure_size_template_pieces_columns(con)
@@ -259,6 +260,12 @@ FABRIC_PROMPTS_DATA: list[dict[str, Any]] = []
 if _FABRIC_PROMPTS_PATH.exists():
     with open(_FABRIC_PROMPTS_PATH, "r", encoding="utf-8") as _fp:
         FABRIC_PROMPTS_DATA = json.load(_fp)
+
+
+def ensure_projects_template_set_id_column(con: sqlite3.Connection) -> None:
+    columns = {row[1] for row in con.execute("pragma table_info(projects)").fetchall()}
+    if "template_set_id" not in columns:
+        con.execute("alter table projects add column template_set_id text not null default ''")
 
 
 def ensure_fabric_prompts_columns(con: sqlite3.Connection) -> None:

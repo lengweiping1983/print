@@ -15,8 +15,19 @@ class ProjectCreate(BaseModel):
 
 class ProjectOut(ProjectCreate):
     id: str
+    template_set_id: str = ""
     created_at: str
     updated_at: str
+
+
+class ProjectUIStatePatch(BaseModel):
+    selected_piece_id: str = ""
+    global_texture_scale: float = 1.0
+    texture_angle: float = 0.0
+    global_offset_x: float = 0.0
+    global_offset_y: float = 0.0
+    global_symmetry: str = "continuous"
+    global_anchor: str = "front_center"
 
 
 class AssetOut(BaseModel):
